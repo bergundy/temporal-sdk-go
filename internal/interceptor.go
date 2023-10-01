@@ -52,6 +52,9 @@ type WorkerInterceptor interface {
 	// the next interceptor in the chain.
 	InterceptWorkflow(ctx Context, next WorkflowInboundInterceptor) WorkflowInboundInterceptor
 
+	// TODO: docs
+	InterceptOperation(ctx Context, next OperationInboundInterceptor) OperationInboundInterceptor
+
 	mustEmbedWorkerInterceptorBase()
 }
 
@@ -332,6 +335,18 @@ type ClientOutboundInterceptor interface {
 	PollWorkflowUpdate(context.Context, *ClientPollWorkflowUpdateInput) (converter.EncodedValue, error)
 
 	mustEmbedClientOutboundInterceptorBase()
+}
+
+// TODO: document
+type OperationInboundInterceptor interface {
+	// // Init is the first call of this interceptor. Implementations can change/wrap
+	// // the outbound interceptor before calling Init on the next interceptor.
+	// Init(outbound OperationOutboundInterceptor) error
+
+	// TODO: document
+	CancelOperation(ctx context.Context, request *CancelOperationRequest) error
+
+	mustEmbedOperationInboundInterceptorBase()
 }
 
 // ClientUpdateWorkflowInput is the input to

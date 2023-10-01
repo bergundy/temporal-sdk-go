@@ -60,6 +60,14 @@ func (*WorkerInterceptorBase) InterceptWorkflow(
 	return &WorkflowInboundInterceptorBase{Next: next}
 }
 
+// InterceptOperation implements WorkerInterceptor.InterceptOperation.
+func (*WorkerInterceptorBase) InterceptOperation(
+	ctx Context,
+	next OperationInboundInterceptor,
+) OperationInboundInterceptor {
+	return &OperationInboundInterceptorBase{Next: next}
+}
+
 func (*WorkerInterceptorBase) mustEmbedWorkerInterceptorBase() {}
 
 // ActivityInboundInterceptorBase is a default implementation of
@@ -464,3 +472,16 @@ func (c *ClientOutboundInterceptorBase) CreateSchedule(ctx context.Context, in *
 }
 
 func (*ClientOutboundInterceptorBase) mustEmbedClientOutboundInterceptorBase() {}
+
+type OperationInboundInterceptorBase struct {
+	Next OperationInboundInterceptor
+}
+
+var _ OperationInboundInterceptor = &OperationInboundInterceptorBase{}
+
+// Init implements OperationInboundInterceptor.Init.
+func (w *OperationInboundInterceptorBase) CancelOperation(ctx context.Context, request *CancelOperationRequest) error {
+	return w.Next.CancelOperation(ctx, request)
+}
+
+func (w *OperationInboundInterceptorBase) mustEmbedOperationInboundInterceptorBase() {}
