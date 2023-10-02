@@ -477,11 +477,20 @@ type OperationInboundInterceptorBase struct {
 	Next OperationInboundInterceptor
 }
 
+type OperationOutboundInterceptorBase struct {
+	Next OperationOutboundInterceptor
+}
+
 var _ OperationInboundInterceptor = &OperationInboundInterceptorBase{}
 
 // Init implements OperationInboundInterceptor.Init.
 func (w *OperationInboundInterceptorBase) CancelOperation(ctx context.Context, request *CancelOperationRequest) error {
 	return w.Next.CancelOperation(ctx, request)
+}
+
+// Init implements ActivityInboundInterceptor.Init.
+func (a *OperationInboundInterceptorBase) Init(outbound OperationOutboundInterceptor) error {
+	return a.Next.Init(outbound)
 }
 
 func (w *OperationInboundInterceptorBase) mustEmbedOperationInboundInterceptorBase() {}

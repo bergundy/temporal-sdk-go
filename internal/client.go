@@ -533,6 +533,7 @@ type (
 	// The current timeout resolution implementation is in seconds and uses math.Ceil(d.Seconds()) as the duration. But is
 	// subjected to change in the future.
 	StartWorkflowOptions struct {
+		Visibility string // TODO enum
 		// ID - The business identifier of the workflow execution.
 		// Optional: defaulted to a uuid.
 		ID string
