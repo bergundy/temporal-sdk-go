@@ -34,13 +34,16 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 
+	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/internal"
+	"go.temporal.io/sdk/operation"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
@@ -2487,3 +2490,55 @@ func (w *Workflows) defaultActivityOptionsWithRetry() workflow.ActivityOptions {
 		},
 	}
 }
+
+func TestBla(T *testing.T) {
+	type MyInput struct {
+		CellID string
+		Stuff  int64
+	}
+	type MyOutput struct {
+	}
+
+	c, _ := client.Dial(client.Options{})
+	w := worker.New(c, "my-task-queue", worker.Options{})
+
+	w.RegisterOperation(&operation.WorkflowRunHandler[MyInput, MyOutput]{
+		Name:     "provision-cell",
+		IDMapper: func(input MyInput) string { return fmt.Sprintf("provision-cell-%s", input.CellID) },
+	})
+
+	w.RegisterOperation(&operation.WorkflowRunHandler[MyInput, MyOutput]{
+		Name: "provision-cell",
+		Start: func(ctx context.Context, input MyInput) (operation.WorkflowRun, error) {
+			return operation.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+				ID: fmt.Sprintf("provision-cell-%s", input.CellID),
+			}, "provision-cell", input)
+		},
+	})
+	// w.RegisterOperation("get-cell-status", func(ctx context.Context, input Input) (*MyOutput, error) {
+	// 	payload, _ := QueryWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "get-cell-status")
+	// 	var output *MyOutput
+	// 	return output, payload.Get(&output)
+	// })
+
+}
+
+// func getTenantID(context.Context, http.Header) (string, error) {
+// 	return "", nil
+// }
+
+// type OperationAuthorizationInterceptor struct {
+// 	OperationInboundInterceptorBase
+// }
+
+// func (*OperationAuthorizationInterceptor) CancelOperation(ctx context.Context, request *CancelOperationRequest) error {
+// 	tenantID, err := getTenantID(ctx, request.Header)
+// 	if err != nil {
+// 		return UnauthorizedError("unauthorized access")
+// 	}
+
+// 	if !strings.HasPrefix(request.OperationID, fmt.Sprintf("%s-%s-", request.Operation, tenantID)) {
+// 		return &nexus.HandlerError{StatusCode: http.StatusUnauthorized, Failure: &nexus.Failure{Message: "unauthorized access"}}
+// 	}
+// 	return nil
+// }

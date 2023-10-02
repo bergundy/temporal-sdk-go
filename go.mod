@@ -35,5 +35,3 @@ require (
 	google.golang.org/genproto v0.0.0-20230525154841-bd750badd5c6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/nexus-rpc/sdk-go => ../nexus-sdk-go

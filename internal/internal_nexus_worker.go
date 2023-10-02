@@ -1,18 +1,14 @@
 package internal
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
-
-	"go.temporal.io/api/common/v1"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
+	"go.temporal.io/api/common/v1"
 )
 
-func (aw *AggregatedWorker) RegisterOperation(string, any) {
+func (aw *AggregatedWorker) RegisterOperation(nexus.Handler) {
 }
 
 type StartOperationRequest struct {
@@ -97,43 +93,3 @@ func (r *StartOperationRequest) Payload() (*common.Payload, error) {
 // func (o *SyncOperationHandler) CancelOperation(ctx context.Context, request *CancelOperationRequest) error {
 // 	return &nexus.HandlerError{StatusCode: http.StatusNotImplemented}
 // }
-
-func getTenantID(context.Context, http.Header) (string, error) {
-	return "", nil
-}
-
-type OperationAuthorizationInterceptor struct {
-	OperationInboundInterceptorBase
-}
-
-func (*OperationAuthorizationInterceptor) CancelOperation(ctx context.Context, request *CancelOperationRequest) error {
-	tenantID, err := getTenantID(ctx, request.Header)
-	if err != nil {
-		return UnauthorizedError("unauthorized access")
-	}
-
-	if !strings.HasPrefix(request.OperationID, fmt.Sprintf("%s-%s-", request.Operation, tenantID)) {
-		return &nexus.HandlerError{StatusCode: http.StatusUnauthorized, Failure: &nexus.Failure{Message: "unauthorized access"}}
-	}
-	return nil
-}
-
-func t() {
-	type Input struct {
-		CellID string
-		Stuff  int64
-	}
-	type MyOutput struct {
-	}
-	var w *AggregatedWorker
-	w.RegisterOperation("provision-cell", func(ctx context.Context, input Input) (WorkflowRun, error) {
-		return ExecuteWorkflow(ctx, StartWorkflowOptions{
-			ID: fmt.Sprintf("provision-cell-%s", input.CellID),
-		}, "provision-cell", input)
-	})
-	w.RegisterOperation("get-cell-status", func(ctx context.Context, input Input) (*MyOutput, error) {
-		payload, _ := QueryWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "get-cell-status")
-		var output *MyOutput
-		return output, payload.Get(&output)
-	})
-}
