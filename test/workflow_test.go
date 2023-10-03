@@ -2503,11 +2503,6 @@ func TestBla(T *testing.T) {
 	w := worker.New(c, "my-task-queue", worker.Options{})
 
 	w.RegisterOperation(&operation.WorkflowRunHandler[MyInput, MyOutput]{
-		Name:     "provision-cell",
-		IDMapper: func(input MyInput) string { return fmt.Sprintf("provision-cell-%s", input.CellID) },
-	})
-
-	w.RegisterOperation(&operation.WorkflowRunHandler[MyInput, MyOutput]{
 		Name: "provision-cell",
 		Start: func(ctx context.Context, input MyInput) (operation.WorkflowRun, error) {
 			return operation.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
@@ -2515,12 +2510,33 @@ func TestBla(T *testing.T) {
 			}, "provision-cell", input)
 		},
 	})
-	// w.RegisterOperation("get-cell-status", func(ctx context.Context, input Input) (*MyOutput, error) {
-	// 	payload, _ := QueryWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "get-cell-status")
-	// 	var output *MyOutput
-	// 	return output, payload.Get(&output)
-	// })
 
+	// Or use a shorthand
+	w.RegisterOperation(&operation.WorkflowRunHandler[MyInput, MyOutput]{
+		Name:     "provision-cell",
+		IDMapper: func(input MyInput) string { return fmt.Sprintf("provision-cell-%s", input.CellID) },
+	})
+
+	// Map the result
+	w.RegisterOperation(&operation.WorkflowRunHandler[MyInput, MyOutput]{
+		Name:     "provision-cell",
+		IDMapper: func(input MyInput) string { return fmt.Sprintf("provision-cell-%s", input.CellID) },
+		ResultMapper: func(ctx context.Context, result any, err error) (MyOutput, error) {
+			return MyOutput{}, nil
+		},
+	})
+
+	// Query
+	w.RegisterOperation(operation.NewSyncHandler("get-cell-status", func(ctx context.Context, input MyInput, c client.Client) (*MyOutput, error) {
+		payload, _ := c.QueryWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "get-cell-status")
+		var output *MyOutput
+		return output, payload.Get(&output)
+	}))
+
+	// Signal
+	w.RegisterOperation(operation.NewVoidHandler("set-cell-status", func(ctx context.Context, input MyInput, c client.Client) error {
+		return c.SignalWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "set-cell-status", input)
+	}))
 }
 
 // func getTenantID(context.Context, http.Header) (string, error) {
