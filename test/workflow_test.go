@@ -2491,52 +2491,63 @@ func (w *Workflows) defaultActivityOptionsWithRetry() workflow.ActivityOptions {
 	}
 }
 
-func TestBla(T *testing.T) {
-	type MyInput struct {
-		CellID string
-		Stuff  int64
-	}
-	type MyOutput struct {
-	}
+type MyInput struct {
+	CellID string
+	Stuff  int64
+}
+type MyOutput struct {
+}
+type MyIntermediateOutput struct{}
 
+var startWorkflowOp = operation.AsyncOperation("provision-cell", func(ctx context.Context, input MyInput) (*operation.WorkflowHandle[MyOutput], error) {
+	return operation.ExecuteWorkflow[MyOutput](ctx, client.StartWorkflowOptions{
+		ID: fmt.Sprintf("provision-cell-%s", input.CellID),
+	}, "provision-cell", input)
+})
+
+var startWorkflowWithMapperOp = operation.AsyncMappedOperation(
+	"provision-cell",
+	func(ctx context.Context, input MyInput) (*operation.WorkflowHandle[MyIntermediateOutput], error) {
+		return operation.ExecuteWorkflow[MyIntermediateOutput](ctx, client.StartWorkflowOptions{
+			ID: fmt.Sprintf("provision-cell-%s", input.CellID),
+		}, "provision-cell", input)
+	},
+	func(ctx context.Context, result MyIntermediateOutput, err error) (MyOutput, error) {
+		return MyOutput{}, nil
+	},
+)
+
+var queryOp = operation.ClientOperation("get-cell-status", func(ctx context.Context, input MyInput, c client.Client) (MyOutput, error) {
+	payload, _ := c.QueryWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "get-cell-status")
+	var output MyOutput
+	return output, payload.Get(&output)
+})
+
+var signalOp = operation.VoidClientOperation("set-cell-status", func(ctx context.Context, input MyInput, c client.Client) error {
+	return c.SignalWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "set-cell-status", input)
+})
+
+func TestRegisterOperation(T *testing.T) {
 	c, _ := client.Dial(client.Options{})
 	w := worker.New(c, "my-task-queue", worker.Options{})
 
-	w.RegisterOperation(&operation.WorkflowRunHandler[MyInput, MyOutput]{
-		Name: "provision-cell",
-		Start: func(ctx context.Context, input MyInput) (operation.WorkflowRun, error) {
-			return operation.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-				ID: fmt.Sprintf("provision-cell-%s", input.CellID),
-			}, "provision-cell", input)
-		},
-	})
+	w.RegisterOperation(startWorkflowOp)
+	w.RegisterOperation(startWorkflowWithMapperOp)
+	w.RegisterOperation(queryOp)
+	w.RegisterOperation(signalOp)
+}
 
-	// Or use a shorthand
-	w.RegisterOperation(&operation.WorkflowRunHandler[MyInput, MyOutput]{
-		Name:     "provision-cell",
-		IDMapper: func(input MyInput) string { return fmt.Sprintf("provision-cell-%s", input.CellID) },
-	})
-
-	// Map the result
-	w.RegisterOperation(&operation.WorkflowRunHandler[MyInput, MyOutput]{
-		Name:     "provision-cell",
-		IDMapper: func(input MyInput) string { return fmt.Sprintf("provision-cell-%s", input.CellID) },
-		ResultMapper: func(ctx context.Context, result any, err error) (MyOutput, error) {
-			return MyOutput{}, nil
-		},
-	})
-
-	// Query
-	w.RegisterOperation(operation.NewSyncHandler("get-cell-status", func(ctx context.Context, input MyInput, c client.Client) (*MyOutput, error) {
-		payload, _ := c.QueryWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "get-cell-status")
-		var output *MyOutput
-		return output, payload.Get(&output)
-	}))
-
-	// Signal
-	w.RegisterOperation(operation.NewVoidHandler("set-cell-status", func(ctx context.Context, input MyInput, c client.Client) error {
-		return c.SignalWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "set-cell-status", input)
-	}))
+func MyWorkflow(ctx workflow.Context) (MyOutput, error) {
+	handle, _ := workflow.StartOperation(ctx, startWorkflowOp, MyInput{})
+	_ = handle.WaitStarted(ctx)
+	_, _ = workflow.StartOperation(ctx, startWorkflowWithMapperOp, MyInput{})
+	_, _ = workflow.StartOperation(ctx, queryOp, MyInput{})
+	_, _ = workflow.StartNamedOperation[MyInput, MyOutput](ctx, "some-op", MyInput{})
+	voidHandle, _ := workflow.StartVoidOperation(ctx, signalOp, MyInput{})
+	_ = voidHandle.WaitStarted(ctx)
+	_ = voidHandle.WaitCompleted(ctx)
+	_, _ = workflow.StartNamedVoidOperation(ctx, "some-op", MyInput{})
+	return handle.GetResult(ctx)
 }
 
 // func getTenantID(context.Context, http.Header) (string, error) {

@@ -31,6 +31,7 @@ import (
 	"go.temporal.io/sdk/internal"
 	"go.temporal.io/sdk/internal/common/metrics"
 	"go.temporal.io/sdk/log"
+	"go.temporal.io/sdk/operation"
 )
 
 type (
@@ -634,4 +635,30 @@ func IsContinueAsNewError(err error) bool {
 // timeout.
 func DataConverterWithoutDeadlockDetection(c converter.DataConverter) converter.DataConverter {
 	return internal.DataConverterWithoutDeadlockDetection(c)
+}
+
+type OperationHandle[R any] interface {
+	WaitStarted(Context) error
+	GetResult(Context) (R, error)
+}
+
+type VoidOperationHandle interface {
+	WaitStarted(Context) error
+	WaitCompleted(Context) error
+}
+
+func StartOperation[I any, R any](ctx Context, op operation.Operation[I, R], input I) (OperationHandle[R], error) {
+	panic("unimplemented")
+}
+
+func StartVoidOperation[I any](ctx Context, op operation.VoidOperation[I], input I) (VoidOperationHandle, error) {
+	panic("unimplemented")
+}
+
+func StartNamedOperation[I any, R any](ctx Context, op string, input I) (OperationHandle[R], error) {
+	panic("unimplemented")
+}
+
+func StartNamedVoidOperation(ctx Context, op string, input any) (VoidOperationHandle, error) {
+	panic("unimplemented")
 }

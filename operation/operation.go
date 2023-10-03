@@ -8,107 +8,192 @@ import (
 	"go.temporal.io/sdk/converter"
 )
 
-type Operation[I any, R any] interface {
+type Operation[I any, O any] interface {
 	GetName() string
+	io(I, O)
 }
 
-type WorkflowRunHandler[I any, R any] struct {
+type VoidOperation[I any] interface {
+	Operation[I, struct{}]
+}
+
+type Handler interface {
+	nexus.Handler
+
+	GetResultMapper() func(context.Context, any, error) (any, error)
+}
+
+type OperationHandler[I any, O any] interface {
+	Operation[I, O]
+	Handler
+}
+
+type VoidOperationHandler[I any] interface {
+	VoidOperation[I]
+	Handler
+}
+
+type AsyncResult[R any] interface {
+	GetOperationID() string
+	GetResult(context.Context, *nexus.GetOperationResultRequest) (R, error)
+
+	private()
+}
+
+type asyncOperation[I any, O any, ARO AsyncResult[O]] struct {
 	nexus.UnimplementedHandler
 
-	Name         string
-	IDMapper     func(I) string
-	ResultMapper func(context.Context, any, error) (R, error)
-	Start        func(context.Context, I) (WorkflowRun, error)
+	Name  string
+	Start func(context.Context, I) (ARO, error)
 }
 
-// CancelOperation implements Handler.
-func (*WorkflowRunHandler[I, R]) CancelOperation(context.Context, *nexus.CancelOperationRequest) error {
-	panic("unimplemented")
+func AsyncOperation[I any, O any, ARO AsyncResult[O]](name string, start func(context.Context, I) (ARO, error)) OperationHandler[I, O] {
+	return &asyncOperation[I, O, ARO]{
+		Name:  name,
+		Start: start,
+	}
 }
 
-// GetOperationInfo implements Handler.
-func (*WorkflowRunHandler[I, R]) GetOperationInfo(context.Context, *nexus.GetOperationInfoRequest) (*nexus.OperationInfo, error) {
-	panic("unimplemented")
-}
-
-// GetOperationResult implements Handler.
-func (*WorkflowRunHandler[I, R]) GetOperationResult(context.Context, *nexus.GetOperationResultRequest) (*nexus.OperationResponseSync, error) {
-	panic("unimplemented")
-}
-
-// StartOperation implements Handler.
-func (*WorkflowRunHandler[I, R]) StartOperation(context.Context, *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
-	panic("unimplemented")
+// GetResultMapper implements Handler.
+func (*asyncOperation[I, O, ARO]) GetResultMapper() func(context.Context, any, error) (any, error) {
+	return nil
 }
 
 // GetName implements Operation.
-func (h *WorkflowRunHandler[I, R]) GetName() string {
+func (h *asyncOperation[I, O, ARO]) GetName() string {
 	return h.Name
 }
 
-var _ nexus.Handler = (*WorkflowRunHandler[any, any])(nil)
-var _ Operation[any, any] = (*WorkflowRunHandler[any, any])(nil)
+// call implements Operation.
+func (*asyncOperation[I, O, ARO]) io(I, O) {}
 
-type SyncHandler[I any, R any] struct {
+var _ OperationHandler[any, any] = (*asyncOperation[any, any, AsyncResult[any]])(nil)
+
+type asyncMappedOperation[I any, M any, O any, ARM AsyncResult[M]] struct {
+	nexus.UnimplementedHandler
+
+	Name         string
+	Start        func(context.Context, I) (ARM, error)
+	ResultMapper func(context.Context, M, error) (O, error)
+}
+
+func AsyncMappedOperation[I any, M any, O any, ARM AsyncResult[M]](name string, start func(context.Context, I) (ARM, error), mapper func(context.Context, M, error) (O, error)) OperationHandler[I, O] {
+	return &asyncMappedOperation[I, M, O, ARM]{
+		Name:         name,
+		Start:        start,
+		ResultMapper: mapper,
+	}
+}
+
+// GetResultMapper implements Handler.
+func (h *asyncMappedOperation[I, M, O, ARM]) GetResultMapper() func(context.Context, any, error) (any, error) {
+	return func(ctx context.Context, a any, err error) (any, error) {
+		var m M
+		return h.ResultMapper(ctx, m, err)
+	}
+}
+
+// GetName implements Operation.
+func (h *asyncMappedOperation[I, M, O, ARM]) GetName() string {
+	return h.Name
+}
+
+// call implements Operation.
+func (*asyncMappedOperation[I, M, O, ARM]) io(I, O) {}
+
+var _ OperationHandler[any, any] = (*asyncMappedOperation[any, any, any, AsyncResult[any]])(nil)
+
+type clientOperation[I any, O any] struct {
 	nexus.UnimplementedHandler
 
 	Name    string
-	Handler func(context.Context, I, client.Client) (R, error)
+	Handler func(context.Context, I, client.Client) (O, error)
 }
 
-func NewSyncHandler[I any, R any](name string, handler func(context.Context, I, client.Client) (R, error)) *SyncHandler[I, R] {
-	return &SyncHandler[I, R]{
+func ClientOperation[I any, O any](name string, handler func(context.Context, I, client.Client) (O, error)) *clientOperation[I, O] {
+	return &clientOperation[I, O]{
 		Name:    name,
 		Handler: handler,
 	}
 }
 
+// GetResultMapper implements OperationHandler.
+func (*clientOperation[I, O]) GetResultMapper() func(context.Context, any, error) (any, error) {
+	return nil
+}
+
+// io implements Operation.
+func (*clientOperation[I, O]) io(I, O) {}
+
 // GetName implements Operation.
-func (h *SyncHandler[I, R]) GetName() string {
+func (h *clientOperation[I, O]) GetName() string {
 	return h.Name
 }
 
 // StartOperation implements Handler.
-func (*SyncHandler[I, R]) StartOperation(context.Context, *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
+func (*clientOperation[I, O]) StartOperation(context.Context, *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
 	panic("unimplemented")
 }
 
-type VoidHandler[I any] struct {
+var _ OperationHandler[any, any] = (*clientOperation[any, any])(nil)
+
+type voidClientOperation[I any] struct {
 	nexus.UnimplementedHandler
 
 	Name    string
 	Handler func(context.Context, I, client.Client) error
 }
 
-// GetName implements Operation.
-func (h *VoidHandler[I]) GetName() string {
-	return h.Name
-}
-
-func NewVoidHandler[I any](name string, handler func(context.Context, I, client.Client) error) *VoidHandler[I] {
-	return &VoidHandler[I]{
+func VoidClientOperation[I any](name string, handler func(context.Context, I, client.Client) error) VoidOperationHandler[I] {
+	return &voidClientOperation[I]{
 		Name:    name,
 		Handler: handler,
 	}
 }
 
-// StartOperation implements Handler.
-func (*VoidHandler[I]) StartOperation(context.Context, *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
+// GetResultMapper implements OperationHandler.
+func (*voidClientOperation[I]) GetResultMapper() func(context.Context, any, error) (any, error) {
+	return nil
+}
+
+// io implements Operation.
+func (*voidClientOperation[I]) io(I, struct{}) {}
+
+// GetName implements Operation.
+func (h *voidClientOperation[I]) GetName() string {
+	return h.Name
+}
+
+var _ VoidOperationHandler[any] = (*voidClientOperation[any])(nil)
+
+type WorkflowHandle[R any] struct {
+	WorkflowID string
+	RunID      string
+}
+
+func (h *WorkflowHandle[R]) GetOperationID() string {
+	return h.WorkflowID
+}
+
+func (*WorkflowHandle[R]) GetResult(ctx context.Context, request *nexus.GetOperationResultRequest) (R, error) {
+	run := getContext(ctx).client.GetWorkflow(ctx, request.OperationID, "")
+	// TODO: if request.Wait {}
+	var ret R
+	err := run.Get(ctx, &ret)
+	return ret, err
+}
+
+func (*WorkflowHandle[O]) private() {
 	panic("unimplemented")
 }
 
-var _ nexus.Handler = (*WorkflowRunHandler[any, any])(nil)
-var _ Operation[any, any] = (*WorkflowRunHandler[any, any])(nil)
+var _ AsyncResult[any] = (*WorkflowHandle[any])(nil)
 
-type WorkflowRun struct {
-	client.WorkflowRun
-}
-
-func ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (WorkflowRun, error) {
+func ExecuteWorkflow[R any](ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (*WorkflowHandle[R], error) {
 	// Override callback URL and request ID
 	// Extract header to use in "visibility scope"
 	run, err := getContext(ctx).client.ExecuteWorkflow(ctx, options, workflow, args...)
-	return WorkflowRun{run}, err
+	return &WorkflowHandle[R]{run.GetID(), run.GetRunID()}, err
 }
 
 func getContext(ctx context.Context) *operationContext {
@@ -138,54 +223,12 @@ func UnauthorizedError(format string, args ...any) Error {
 }
 
 type operationContext struct {
-	client        client.Client
-	dataConverter converter.DataConverter
-	// TODO: should support any request type
-	request *nexus.StartOperationRequest
+	client                    client.Client
+	dataConverter             converter.DataConverter
+	startOperationRequest     *nexus.StartOperationRequest
+	cancelOperationRequest    *nexus.CancelOperationRequest
+	getOperationResultRequest *nexus.GetOperationResultRequest
+	getOperationInfoRequest   *nexus.GetOperationInfoRequest
 }
 
 var contextKeyOperationState = struct{}{}
-
-// func WorkflowRunOperation[I any, R any](name string, handler func(context.Context, I) (WorkflowHandle[R], error)) nexus.Handler {
-// 	panic("not implemented")
-// }
-
-// func WorkflowRunOperationWithResultMapper[I any, R any, M any](name string, handler func(context.Context, I) (WorkflowHandle[M], error), mapper func(context.Context, M, error) (R, error)) nexus.Handler {
-// 	panic("not implemented")
-// }
-
-// // TODO
-// func WorkflowRunOperationWithPayloadMapper[I any, R any](name string, handler func(context.Context, I) (WorkflowHandle[any], error), mapper func(context.Context, *commonpb.Payload, error) (R, error)) nexus.Handler {
-// 	panic("not implemented")
-// }
-
-// func WorkflowRunIDMapper[T any](func(context.Context, T) string) nexus.Handler {
-// 	panic("not implemented")
-// }
-
-// type WorkflowHandle[T any] struct {
-// 	ID    string
-// 	RunID string
-// }
-
-// func newWorkflowHandle[T any](r client.WorkflowRun) *WorkflowHandle[T] {
-// 	panic("")
-// }
-
-// func (h *WorkflowHandle[T]) Get(context.Context) (T, error) {
-// 	panic("")
-// }
-
-// func (h *WorkflowHandle[T]) GetWithOptions(ctx context.Context, valuePtr interface{}, options client.WorkflowRunGetOptions) error {
-// 	panic("")
-// }
-
-// func ExecuteWorkflow[I any, R any](ctx context.Context, options client.StartWorkflowOptions, workflow func(workflow.Context, I) (R, error), arg I) (*WorkflowHandle[R], error) {
-// 	// Override callback URL and request ID
-// 	// Extract header to use in visibility scope
-// 	run, err := getContext(ctx).client.ExecuteWorkflow(ctx, options, workflow, arg)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return newWorkflowHandle[R](run), err
-// }
