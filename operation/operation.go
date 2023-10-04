@@ -11,7 +11,7 @@ import (
 
 type NoResult struct{}
 
-type Operation[I any, O any] interface {
+type Operation[I, O any] interface {
 	GetName() string
 	io(I, O)
 }
@@ -22,71 +22,57 @@ type Handler interface {
 	GetResultMapper() func(context.Context, any, error) (any, error)
 }
 
-type AsyncResult[R any] interface {
-	// Implementors must implement the entire handler API apart from StartOperation.
-	GetOperationResult(context.Context, *nexus.GetOperationResultRequest) (R, error)
-	GetOperationInfo(context.Context, *nexus.GetOperationInfoRequest) (*nexus.OperationInfo, error)
-	CancelOperation(context.Context, *nexus.CancelOperationRequest) error
-
-	GetOperationID() string
+type OperationHandler[I, O any] interface {
+	Operation[I, O]
+	Handler
 }
 
-type AsyncOperation[I any, O any, ARO AsyncResult[O]] struct {
+type WorkflowOperation[I, O any] struct {
 	nexus.UnimplementedHandler
 
-	Name  string
-	Start func(context.Context, client.Client, I) (ARO, error)
+	Name     string
+	Workflow func(shared.Context, I) (O, error)
+	Options  func(context.Context, I) client.StartWorkflowOptions
+	Start    func(context.Context, client.Client, I) (*WorkflowHandle[O], error)
 }
 
-func NewAsyncOperation[I any, O any, ARO AsyncResult[O]](name string, start func(context.Context, client.Client, I) (ARO, error)) *AsyncOperation[I, O, ARO] {
-	return &AsyncOperation[I, O, ARO]{
+func NewWorkflowOperation[I, O any](name string, start func(context.Context, client.Client, I) (*WorkflowHandle[O], error)) *WorkflowOperation[I, O] {
+	return &WorkflowOperation[I, O]{
 		Name:  name,
 		Start: start,
 	}
 }
 
 // GetResultMapper implements Handler.
-func (*AsyncOperation[I, O, ARO]) GetResultMapper() func(context.Context, any, error) (any, error) {
+func (*WorkflowOperation[I, O]) GetResultMapper() func(context.Context, any, error) (any, error) {
 	return nil
 }
 
 // GetName implements Operation.
-func (h *AsyncOperation[I, O, ARO]) GetName() string {
+func (h *WorkflowOperation[I, O]) GetName() string {
 	return h.Name
 }
 
 // call implements Operation.
-func (*AsyncOperation[I, O, ARO]) io(I, O) {}
+func (*WorkflowOperation[I, O]) io(I, O) {}
 
-var _ Operation[any, any] = (*AsyncOperation[any, any, AsyncResult[any]])(nil)
-var _ Handler = (*AsyncOperation[any, any, AsyncResult[any]])(nil)
+var _ OperationHandler[any, any] = (*WorkflowOperation[any, any])(nil)
 
-type AsyncOperationWithResultMapper[I any, M any, O any, ARM AsyncResult[M]] struct {
+type MappedResultHandler[I, M, O any] struct {
 	nexus.UnimplementedHandler
-
-	Name         string
-	Start        func(context.Context, client.Client, I) (ARM, error)
+	Handler      OperationHandler[I, M]
 	ResultMapper func(context.Context, M, error) (O, error)
 }
 
-func NewAsyncOperationWithResultMapper[I any, M any, O any, ARM AsyncResult[M]](name string, start func(context.Context, client.Client, I) (ARM, error), mapper func(context.Context, M, error) (O, error)) *AsyncOperationWithResultMapper[I, M, O, ARM] {
-	return &AsyncOperationWithResultMapper[I, M, O, ARM]{
-		Name:         name,
-		Start:        start,
-		ResultMapper: mapper,
-	}
-}
-
-func WithResultMapper[I, M, O any, ARM AsyncResult[M]](op *AsyncOperation[I, M, ARM], mapper func(context.Context, M, error) (O, error)) *AsyncOperationWithResultMapper[I, M, O, ARM] {
-	return &AsyncOperationWithResultMapper[I, M, O, ARM]{
-		Name:         op.Name,
-		Start:        op.Start,
+func WithResultMapper[I, M, O any](op OperationHandler[I, M], mapper func(context.Context, M, error) (O, error)) *MappedResultHandler[I, M, O] {
+	return &MappedResultHandler[I, M, O]{
+		Handler:      op,
 		ResultMapper: mapper,
 	}
 }
 
 // GetResultMapper implements Handler.
-func (h *AsyncOperationWithResultMapper[I, M, O, ARM]) GetResultMapper() func(context.Context, any, error) (any, error) {
+func (h *MappedResultHandler[I, M, O]) GetResultMapper() func(context.Context, any, error) (any, error) {
 	return func(ctx context.Context, a any, err error) (any, error) {
 		var m M
 		return h.ResultMapper(ctx, m, err)
@@ -94,15 +80,14 @@ func (h *AsyncOperationWithResultMapper[I, M, O, ARM]) GetResultMapper() func(co
 }
 
 // GetName implements Operation.
-func (h *AsyncOperationWithResultMapper[I, M, O, ARM]) GetName() string {
-	return h.Name
+func (h *MappedResultHandler[I, M, O]) GetName() string {
+	return h.Handler.GetName()
 }
 
 // call implements Operation.
-func (*AsyncOperationWithResultMapper[I, M, O, ARM]) io(I, O) {}
+func (*MappedResultHandler[I, M, O]) io(I, O) {}
 
-var _ Operation[any, any] = (*AsyncOperationWithResultMapper[any, any, any, AsyncResult[any]])(nil)
-var _ Handler = (*AsyncOperationWithResultMapper[any, any, any, AsyncResult[any]])(nil)
+var _ OperationHandler[any, any] = (*MappedResultHandler[any, any, any])(nil)
 
 type SyncOperation[I any, O any] struct {
 	nexus.UnimplementedHandler
@@ -192,8 +177,6 @@ func (h *WorkflowHandle[R]) GetOperationInfo(ctx context.Context, request *nexus
 func (h *WorkflowHandle[R]) CancelOperation(ctx context.Context, request *nexus.CancelOperationRequest) error {
 	panic("TODO")
 }
-
-var _ AsyncResult[any] = (*WorkflowHandle[any])(nil)
 
 func GetClient(ctx context.Context) client.Client {
 	return getContext(ctx).client
