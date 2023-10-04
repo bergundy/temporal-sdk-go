@@ -2513,7 +2513,7 @@ var startWorkflowSimple = operation.WorkflowRun[MyInput, MyOutput]{
 	},
 }
 
-var startWorkflowOp = operation.NewWorkflowRun("provision-cell", func(ctx context.Context, c client.Client, input MyInput) (*operation.WorkflowHandle[MyOutput], error) {
+var startWorkflowOp = operation.NewWorkflowRun("provision-cell", func(ctx context.Context, c client.Client, input MyInput) (operation.WorkflowHandle[MyOutput], error) {
 	return operation.StartWorkflow(ctx, c, client.StartWorkflowOptions{
 		ID: "provision-cell-" + input.CellID,
 	}, MyHandlerWorkflow, input)
@@ -2526,7 +2526,7 @@ var queryOp = operation.NewSync("get-cell-status", func(ctx context.Context, c c
 })
 
 var signalOp = operation.NewSync("set-cell-status", func(ctx context.Context, c client.Client, input MyInput) (operation.NoResult, error) {
-	return operation.NoResult{}, c.SignalWorkflow(ctx, "provision-cell-"+input.CellID, "", "set-cell-status", input)
+	return nil, c.SignalWorkflow(ctx, "provision-cell-"+input.CellID, "", "set-cell-status", input)
 })
 
 var startWorkflowWithMapperOp = operation.WithResultMapper(

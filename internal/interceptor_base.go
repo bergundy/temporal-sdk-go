@@ -26,6 +26,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/internal/common/metrics"
 	"go.temporal.io/sdk/log"
@@ -474,23 +475,34 @@ func (c *ClientOutboundInterceptorBase) CreateSchedule(ctx context.Context, in *
 func (*ClientOutboundInterceptorBase) mustEmbedClientOutboundInterceptorBase() {}
 
 type OperationInboundInterceptorBase struct {
+	nexus.UnimplementedHandler
 	Next OperationInboundInterceptor
+}
+
+var _ OperationInboundInterceptor = &OperationInboundInterceptorBase{}
+
+func (w *OperationInboundInterceptorBase) mustEmbedOperationInboundInterceptorBase() {}
+
+// CancelOperation implements OperationInboundInterceptor.
+func (w *OperationInboundInterceptorBase) CancelOperation(ctx context.Context, request *nexus.CancelOperationRequest) error {
+	return w.Next.CancelOperation(ctx, request)
+}
+
+// Init implements OperationInboundInterceptor.
+func (a *OperationInboundInterceptorBase) Init(outbound OperationOutboundInterceptor) error {
+	return a.Next.Init(outbound)
 }
 
 type OperationOutboundInterceptorBase struct {
 	Next OperationOutboundInterceptor
 }
 
-var _ OperationInboundInterceptor = &OperationInboundInterceptorBase{}
+var _ OperationOutboundInterceptor = &OperationOutboundInterceptorBase{}
 
-// Init implements OperationInboundInterceptor.Init.
-func (w *OperationInboundInterceptorBase) CancelOperation(ctx context.Context, request *CancelOperationRequest) error {
-	return w.Next.CancelOperation(ctx, request)
+// mustEmbedOperationOutboundInterceptorBase implements OperationOutboundInterceptor.
+func (*OperationOutboundInterceptorBase) mustEmbedOperationOutboundInterceptorBase() {}
+
+// ExecuteOperation implements OperationOutboundInterceptor.
+func (*OperationOutboundInterceptorBase) ExecuteOperation(context.Context, *ClientExecuteWorkflowInput) (WorkflowRun, error) {
+	panic("unimplemented")
 }
-
-// Init implements ActivityInboundInterceptor.Init.
-func (a *OperationInboundInterceptorBase) Init(outbound OperationOutboundInterceptor) error {
-	return a.Next.Init(outbound)
-}
-
-func (w *OperationInboundInterceptorBase) mustEmbedOperationInboundInterceptorBase() {}

@@ -26,6 +26,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	updatepb "go.temporal.io/api/update/v1"
@@ -339,19 +340,19 @@ type ClientOutboundInterceptor interface {
 
 // TODO: document
 type OperationInboundInterceptor interface {
-	// // Init is the first call of this interceptor. Implementations can change/wrap
-	// // the outbound interceptor before calling Init on the next interceptor.
+	// Init is the first call of this interceptor. Implementations can change/wrap
+	// the outbound interceptor before calling Init on the next interceptor.
 	Init(outbound OperationOutboundInterceptor) error
 
-	// TODO: document
-	CancelOperation(ctx context.Context, request *CancelOperationRequest) error
+	nexus.Handler
 
 	mustEmbedOperationInboundInterceptorBase()
 }
 
 type OperationOutboundInterceptor interface {
-	GetClient(context.Context) (WorkflowClient, error)
-	// TODO: mustEmbedOperationOutboundInterceptorBase()
+	// TODO: this should return a handle not a run
+	ExecuteOperation(context.Context, *ClientExecuteWorkflowInput) (WorkflowRun, error)
+	mustEmbedOperationOutboundInterceptorBase()
 }
 
 // ClientUpdateWorkflowInput is the input to

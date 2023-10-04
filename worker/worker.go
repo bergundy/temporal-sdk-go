@@ -28,7 +28,6 @@ package worker
 import (
 	"context"
 
-	"github.com/nexus-rpc/sdk-go/nexus"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/workflowservice/v1"
 
@@ -153,7 +152,7 @@ type (
 	}
 
 	OperationRegistry interface {
-		RegisterOperation(nexus.Handler)
+		RegisterOperation(internal.OperationHandler)
 	}
 
 	// WorkflowReplayer supports replaying a workflow from its event history.
