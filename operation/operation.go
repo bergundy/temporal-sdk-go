@@ -35,10 +35,10 @@ type AsyncOperation[I any, O any, ARO AsyncResult[O]] struct {
 	nexus.UnimplementedHandler
 
 	Name  string
-	Start func(context.Context, I) (ARO, error)
+	Start func(context.Context, client.Client, I) (ARO, error)
 }
 
-func NewAsyncOperation[I any, O any, ARO AsyncResult[O]](name string, start func(context.Context, I) (ARO, error)) *AsyncOperation[I, O, ARO] {
+func NewAsyncOperation[I any, O any, ARO AsyncResult[O]](name string, start func(context.Context, client.Client, I) (ARO, error)) *AsyncOperation[I, O, ARO] {
 	return &AsyncOperation[I, O, ARO]{
 		Name:  name,
 		Start: start,
@@ -65,11 +65,11 @@ type AsyncOperationWithResultMapper[I any, M any, O any, ARM AsyncResult[M]] str
 	nexus.UnimplementedHandler
 
 	Name         string
-	Start        func(context.Context, I) (ARM, error)
+	Start        func(context.Context, client.Client, I) (ARM, error)
 	ResultMapper func(context.Context, M, error) (O, error)
 }
 
-func NewAsyncOperationWithResultMapper[I any, M any, O any, ARM AsyncResult[M]](name string, start func(context.Context, I) (ARM, error), mapper func(context.Context, M, error) (O, error)) *AsyncOperationWithResultMapper[I, M, O, ARM] {
+func NewAsyncOperationWithResultMapper[I any, M any, O any, ARM AsyncResult[M]](name string, start func(context.Context, client.Client, I) (ARM, error), mapper func(context.Context, M, error) (O, error)) *AsyncOperationWithResultMapper[I, M, O, ARM] {
 	return &AsyncOperationWithResultMapper[I, M, O, ARM]{
 		Name:         name,
 		Start:        start,
@@ -108,10 +108,10 @@ type SyncOperation[I any, O any] struct {
 	nexus.UnimplementedHandler
 
 	Name    string
-	Handler func(context.Context, I) (O, error)
+	Handler func(context.Context, client.Client, I) (O, error)
 }
 
-func NewSyncOperation[I any, O any](name string, handler func(context.Context, I) (O, error)) *SyncOperation[I, O] {
+func NewSyncOperation[I any, O any](name string, handler func(context.Context, client.Client, I) (O, error)) *SyncOperation[I, O] {
 	return &SyncOperation[I, O]{
 		Name:    name,
 		Handler: handler,
@@ -143,10 +143,10 @@ type VoidOperation[I any] struct {
 	nexus.UnimplementedHandler
 
 	Name    string
-	Handler func(context.Context, I) error
+	Handler func(context.Context, client.Client, I) error
 }
 
-func NewVoidOperation[I any](name string, handler func(context.Context, I) error) *VoidOperation[I] {
+func NewVoidOperation[I any](name string, handler func(context.Context, client.Client, I) error) *VoidOperation[I] {
 	return &VoidOperation[I]{
 		Name:    name,
 		Handler: handler,
@@ -199,17 +199,17 @@ func GetClient(ctx context.Context) client.Client {
 	return getContext(ctx).client
 }
 
-func StartWorkflow[I, O any, WF func(shared.Context, I) (O, error)](ctx context.Context, options client.StartWorkflowOptions, workflow WF, arg I) (*WorkflowHandle[O], error) {
+func StartWorkflow[I, O any, WF func(shared.Context, I) (O, error)](ctx context.Context, c client.Client, options client.StartWorkflowOptions, workflow WF, arg I) (*WorkflowHandle[O], error) {
 	// Override callback URL and request ID
 	// Extract header to use in "visibility scope"
-	run, err := GetClient(ctx).ExecuteWorkflow(ctx, options, workflow, arg)
+	run, err := c.ExecuteWorkflow(ctx, options, workflow, arg)
 	return &WorkflowHandle[O]{ID: run.GetID()}, err
 }
 
-func StartUntypedWorkflow[R any](ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (*WorkflowHandle[R], error) {
+func StartUntypedWorkflow[R any](ctx context.Context, c client.Client, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (*WorkflowHandle[R], error) {
 	// Override callback URL and request ID
 	// Extract header to use in "visibility scope"
-	run, err := GetClient(ctx).ExecuteWorkflow(ctx, options, workflow, args...)
+	run, err := c.ExecuteWorkflow(ctx, options, workflow, args...)
 	return &WorkflowHandle[R]{ID: run.GetID()}, err
 }
 

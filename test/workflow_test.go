@@ -2504,10 +2504,20 @@ func MyHandlerWorkflow(ctx workflow.Context, input MyInput) (MyOutput, error) {
 	return MyOutput{}, nil
 }
 
-var startWorkflowOp = operation.NewAsyncOperation("provision-cell", func(ctx context.Context, input MyInput) (*operation.WorkflowHandle[MyOutput], error) {
-	return operation.StartWorkflow(ctx, client.StartWorkflowOptions{
+var startWorkflowOp = operation.NewAsyncOperation("provision-cell", func(ctx context.Context, c client.Client, input MyInput) (*operation.WorkflowHandle[MyOutput], error) {
+	return operation.StartWorkflow(ctx, c, client.StartWorkflowOptions{
 		ID: "provision-cell-" + input.CellID,
 	}, MyHandlerWorkflow, input)
+})
+
+var queryOp = operation.NewSyncOperation("get-cell-status", func(ctx context.Context, c client.Client, input MyInput) (MyOutput, error) {
+	payload, _ := c.QueryWorkflow(ctx, "provision-cell-"+input.CellID, "", "get-cell-status")
+	var output MyOutput
+	return output, payload.Get(&output)
+})
+
+var signalOp = operation.NewSyncOperation("set-cell-status", func(ctx context.Context, c client.Client, input MyInput) (operation.NoResult, error) {
+	return operation.NoResult{}, c.SignalWorkflow(ctx, "provision-cell-"+input.CellID, "", "set-cell-status", input)
 })
 
 var startWorkflowWithMapperOp = operation.WithResultMapper(
@@ -2517,20 +2527,10 @@ var startWorkflowWithMapperOp = operation.WithResultMapper(
 	},
 )
 
-var queryOp = operation.NewSyncOperation("get-cell-status", func(ctx context.Context, input MyInput) (MyOutput, error) {
-	payload, _ := operation.GetClient(ctx).QueryWorkflow(ctx, "provision-cell-"+input.CellID, "", "get-cell-status")
-	var output MyOutput
-	return output, payload.Get(&output)
-})
-
-var signalOp = operation.NewVoidOperation("set-cell-status", func(ctx context.Context, input MyInput) error {
-	return operation.GetClient(ctx).SignalWorkflow(ctx, "provision-cell-"+input.CellID, "", "set-cell-status", input)
-})
-
 var startWorkflowWithMapperOp2 = operation.NewAsyncOperationWithResultMapper(
 	"provision-cell",
-	func(ctx context.Context, input MyInput) (*operation.WorkflowHandle[MyIntermediateOutput], error) {
-		return operation.StartUntypedWorkflow[MyIntermediateOutput](ctx, client.StartWorkflowOptions{
+	func(ctx context.Context, c client.Client, input MyInput) (*operation.WorkflowHandle[MyIntermediateOutput], error) {
+		return operation.StartUntypedWorkflow[MyIntermediateOutput](ctx, c, client.StartWorkflowOptions{
 			ID: "provision-cell-" + input.CellID,
 		}, "provision-cell", input)
 	},
@@ -2563,10 +2563,15 @@ func MyCallerWorkflow(ctx workflow.Context) (MyOutput, error) {
 	return handle.GetResult(ctx)
 }
 
-func NewWorkflowOperation[I, O any](name string, idMapper func(ctx context.Context, input I) string) *operation.AsyncOperation[I, O, *operation.WorkflowHandle[O]] {
-	return operation.NewAsyncOperation(name, func(ctx context.Context, input I) (*operation.WorkflowHandle[O], error) {
-		return operation.StartUntypedWorkflow[O](ctx, client.StartWorkflowOptions{
-			ID: idMapper(ctx, input),
+type WorkflowOperationOptions[I, O any] struct {
+	IDMapper func(ctx context.Context, input I) string
+	// other forms of starting a workflow
+}
+
+func NewWorkflowOperation[I, O any](name string, opts WorkflowOperationOptions[I, O]) *operation.AsyncOperation[I, O, *operation.WorkflowHandle[O]] {
+	return operation.NewAsyncOperation(name, func(ctx context.Context, c client.Client, input I) (*operation.WorkflowHandle[O], error) {
+		return operation.StartUntypedWorkflow[O](ctx, c, client.StartWorkflowOptions{
+			ID: opts.IDMapper(ctx, input),
 		}, name, input)
 	})
 }
