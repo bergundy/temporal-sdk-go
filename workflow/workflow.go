@@ -651,7 +651,7 @@ func StartOperation[I any, R any](ctx Context, op operation.Operation[I, R], inp
 	panic("unimplemented")
 }
 
-func StartVoidOperation[I any](ctx Context, op operation.VoidOperation[I], input I) (VoidOperationHandle, error) {
+func StartVoidOperation[I any](ctx Context, op operation.Operation[I, operation.NoResult], input I) (VoidOperationHandle, error) {
 	panic("unimplemented")
 }
 
