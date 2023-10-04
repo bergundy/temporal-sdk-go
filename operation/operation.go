@@ -2,8 +2,8 @@ package operation
 
 import (
 	"context"
+	"io"
 	"net/http"
-	"net/url"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
@@ -23,6 +23,15 @@ type Operation[I, O any] interface {
 type OperationHandler[I, O any] interface {
 	Operation[I, O]
 	nexus.Handler
+	MapCompletion(context.Context, nexus.OperationCompletion) (nexus.OperationCompletion, error)
+}
+
+type unimplementedHandler struct {
+	nexus.Handler
+}
+
+func (*unimplementedHandler) MapCompletion(context.Context, nexus.OperationCompletion) (nexus.OperationCompletion, error) {
+	return nil, NewNotFoundError("cannot map completion")
 }
 
 type WorkflowRunOperationIDBinding int
@@ -32,10 +41,18 @@ const (
 	WorkflowRunOperationIDBindingRunID
 )
 
+type FailureVerbosity int
+
+const (
+	FailureVerbosityInternal FailureVerbosity = iota
+	FailureVerbosityExternal
+)
+
 type WorkflowRun[I, O any] struct {
-	nexus.UnimplementedHandler
+	unimplementedHandler
 
 	OperationIDBinding WorkflowRunOperationIDBinding
+	FailureVerbosity   FailureVerbosity
 
 	Name  string
 	Start func(context.Context, client.Client, I) (WorkflowHandle[O], error)
@@ -58,7 +75,7 @@ func (h *WorkflowRun[I, O]) GetName() string {
 }
 
 func (h *WorkflowRun[I, O]) StartOperation(ctx context.Context, request *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
-	payload, err := payloadFromHTTP(request.HTTPRequest)
+	payload, err := httpToPayload(request.HTTPRequest.Header, request.HTTPRequest.Body)
 	if err != nil {
 		// log actual error?
 		return nil, NewBadRequestError("invalid request payload")
@@ -83,48 +100,73 @@ func (*WorkflowRun[I, O]) io(I, O) {}
 
 var _ OperationHandler[any, any] = (*WorkflowRun[any, any])(nil)
 
-type MappedResultHandler[I, M, O any] struct {
-	nexus.UnimplementedHandler
-	Handler      OperationHandler[I, M]
-	ResultMapper func(context.Context, M, error) (O, error)
+type MappedCompletionHandler[I, M, O any] struct {
+	unimplementedHandler
+	Handler       OperationHandler[I, M]
+	ResultMapper  func(context.Context, M) (O, error)
+	FailureMapper func(context.Context, *nexus.Failure) (*nexus.Failure, error)
 }
 
-func WithResultMapper[I, M, O any](op OperationHandler[I, M], mapper func(context.Context, M, error) (O, error)) *MappedResultHandler[I, M, O] {
-	return &MappedResultHandler[I, M, O]{
+func WithResultMapper[I, M, O any](op OperationHandler[I, M], mapper func(context.Context, M) (O, error)) *MappedCompletionHandler[I, M, O] {
+	return &MappedCompletionHandler[I, M, O]{
 		Handler:      op,
 		ResultMapper: mapper,
 	}
 }
 
-func (h *MappedResultHandler[I, M, O]) StartOperation(ctx context.Context, request *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
-	if next := request.HTTPRequest.URL.Query().Get("next"); next != "" {
-		if request.HTTPRequest.URL.Query().Get("token") != "TODO" {
-			// someone's trying to use us a relay.
-			return nil, NewBadRequestError("next query param not supported")
-		}
-		httpReq, err := http.NewRequestWithContext(ctx, request.HTTPRequest.Method, next, request.HTTPRequest.Body)
-		if err != nil {
-			// TODO: non-retryable
-			return nil, err
-		}
-		// TODO: make this configurable
-		response, err := http.DefaultClient.Do(httpReq)
-		if err != nil {
-			// TODO: consider dropping after a few attempts, for now internal server error seems fine
-			return nil, err
-		}
-		return &nexus.OperationResponseSync{Body: response.Body, Header: response.Header}, nil
+func WithFailureMapper[I, M, O any](op OperationHandler[I, M], mapper func(context.Context, *nexus.Failure) (*nexus.Failure, error)) *MappedCompletionHandler[I, M, O] {
+	return &MappedCompletionHandler[I, M, O]{
+		Handler:       op,
+		FailureMapper: mapper,
 	}
-	u := *request.HTTPRequest.URL
-	var q url.Values
-	q.Add("next", request.CallbackURL)
-	q.Add("token", "TODO")
-	u.RawQuery = q.Encode()
-	request.CallbackURL = u.String()
+}
+
+func (h *MappedCompletionHandler[I, M, O]) MapCompletion(ctx context.Context, completion nexus.OperationCompletion) (nexus.OperationCompletion, error) {
+	switch t := completion.(type) {
+	case *nexus.OperationCompletionSuccessful:
+		payload, err := httpToPayload(t.Header, t.Body)
+		if err != nil {
+			// log actual error?
+			return nil, NewBadRequestError("invalid request payload")
+		}
+		dc := getContext(ctx).dataConverter
+		var i M
+		err = dc.FromPayload(payload, &i)
+		if err != nil {
+			// log actual error?
+			return nil, NewBadRequestError("invalid request payload")
+		}
+		o, err := h.ResultMapper(ctx, i)
+		if err != nil {
+			return nil, err
+		}
+		payload, err = dc.ToPayload(o)
+		if err != nil {
+			return nil, err
+		}
+
+		header, body, err := payloadToHTTP(payload)
+		if err != nil {
+			return nil, err
+		}
+		return &nexus.OperationCompletionSuccessful{Header: header, Body: body}, nil
+	case *nexus.OperationCompletionUnsuccessful:
+		failure, err := h.FailureMapper(ctx, t.Failure)
+		if err != nil {
+			return nil, err
+		}
+		return &nexus.OperationCompletionUnsuccessful{Header: t.Header, State: t.State, Failure: failure}, nil
+	}
+	panic("unreachable")
+}
+
+func (h *MappedCompletionHandler[I, M, O]) StartOperation(ctx context.Context, request *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
+	getContext(ctx).requiresResultMapping = h.ResultMapper != nil
+	getContext(ctx).requiresFailureMapping = h.FailureMapper != nil
 	return h.Handler.StartOperation(ctx, request)
 }
 
-func (h *MappedResultHandler[I, M, O]) GetOperationResult(ctx context.Context, request *nexus.GetOperationResultRequest) (*nexus.OperationResponseSync, error) {
+func (h *MappedCompletionHandler[I, M, O]) GetOperationResult(ctx context.Context, request *nexus.GetOperationResultRequest) (*nexus.OperationResponseSync, error) {
 	response, err := h.Handler.GetOperationResult(ctx, request)
 	// var m M
 	// return h.ResultMapper(ctx, m, err)
@@ -132,17 +174,17 @@ func (h *MappedResultHandler[I, M, O]) GetOperationResult(ctx context.Context, r
 }
 
 // GetName implements Operation.
-func (h *MappedResultHandler[I, M, O]) GetName() string {
+func (h *MappedCompletionHandler[I, M, O]) GetName() string {
 	return h.Handler.GetName()
 }
 
 // call implements Operation.
-func (*MappedResultHandler[I, M, O]) io(I, O) {}
+func (*MappedCompletionHandler[I, M, O]) io(I, O) {}
 
-var _ OperationHandler[any, any] = (*MappedResultHandler[any, any, any])(nil)
+var _ OperationHandler[any, any] = (*MappedCompletionHandler[any, any, any])(nil)
 
 type Sync[I any, O any] struct {
-	nexus.UnimplementedHandler
+	unimplementedHandler
 
 	Name    string
 	Handler func(context.Context, client.Client, I) (O, error)
@@ -165,7 +207,7 @@ func (h *Sync[I, O]) GetName() string {
 
 // StartOperation implements Handler.
 func (h *Sync[I, O]) StartOperation(ctx context.Context, request *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
-	payload, err := payloadFromHTTP(request.HTTPRequest)
+	payload, err := httpToPayload(request.HTTPRequest.Header, request.HTTPRequest.Body)
 	if err != nil {
 		// log actual error?
 		return nil, NewBadRequestError("invalid request payload")
@@ -183,35 +225,15 @@ func (h *Sync[I, O]) StartOperation(ctx context.Context, request *nexus.StartOpe
 		return nil, err
 	}
 
-	// TODO: support more payloads
-	return nexus.NewOperationResponseSync(o)
+	payload, err = dc.ToPayload(o)
+	header, body, err := payloadToHTTP(payload)
+	if err != nil {
+		return nil, err
+	}
+	return &nexus.OperationResponseSync{Header: header, Body: body}, nil
 }
 
 var _ OperationHandler[any, any] = (*Sync[any, any])(nil)
-
-type VoidOperation[I any] struct {
-	nexus.UnimplementedHandler
-
-	Name    string
-	Handler func(context.Context, client.Client, I) error
-}
-
-func NewVoidOperation[I any](name string, handler func(context.Context, client.Client, I) error) *VoidOperation[I] {
-	return &VoidOperation[I]{
-		Name:    name,
-		Handler: handler,
-	}
-}
-
-// io implements Operation.
-func (*VoidOperation[I]) io(I, NoResult) {}
-
-// GetName implements Operation.
-func (h *VoidOperation[I]) GetName() string {
-	return h.Name
-}
-
-var _ OperationHandler[any, NoResult] = (*VoidOperation[any])(nil)
 
 type WorkflowHandle[T any] interface {
 	GetID() string
@@ -254,12 +276,18 @@ func getContext(ctx context.Context) *operationContext {
 }
 
 type operationContext struct {
-	client        client.Client
-	dataConverter converter.DataConverter
+	client                 client.Client
+	dataConverter          converter.DataConverter
+	requiresResultMapping  bool
+	requiresFailureMapping bool
 }
 
 var contextKeyOperationState = struct{}{}
 
-func payloadFromHTTP(request *http.Request) (*commonpb.Payload, error) {
+func httpToPayload(header http.Header, body io.Reader) (*commonpb.Payload, error) {
+	panic("TODO")
+}
+
+func payloadToHTTP(*commonpb.Payload) (http.Header, io.Reader, error) {
 	panic("TODO")
 }

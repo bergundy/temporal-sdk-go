@@ -2531,7 +2531,7 @@ var signalOp = operation.NewSync("set-cell-status", func(ctx context.Context, c 
 
 var startWorkflowWithMapperOp = operation.WithResultMapper(
 	startWorkflowOp,
-	func(ctx context.Context, result MyOutput, err error) (MyMappedOutput, error) {
+	func(ctx context.Context, result MyOutput) (MyMappedOutput, error) {
 		return MyMappedOutput{}, nil
 	},
 )
