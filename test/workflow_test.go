@@ -2504,28 +2504,28 @@ func MyHandlerWorkflow(ctx workflow.Context, input MyInput) (MyOutput, error) {
 	return MyOutput{}, nil
 }
 
-var startWorkflowSimple = operation.WorkflowOperation[MyInput, MyOutput]{
+var startWorkflowSimple = operation.WorkflowRun[MyInput, MyOutput]{
 	Workflow: MyHandlerWorkflow,
-	Options: func(ctx context.Context, input MyInput) client.StartWorkflowOptions {
+	GetOptions: func(ctx context.Context, input MyInput) (client.StartWorkflowOptions, error) {
 		return client.StartWorkflowOptions{
 			ID: "provision-cell-" + input.CellID,
-		}
+		}, nil
 	},
 }
 
-var startWorkflowOp = operation.NewWorkflowOperation("provision-cell", func(ctx context.Context, c client.Client, input MyInput) (*operation.WorkflowHandle[MyOutput], error) {
+var startWorkflowOp = operation.NewWorkflowRun("provision-cell", func(ctx context.Context, c client.Client, input MyInput) (*operation.WorkflowHandle[MyOutput], error) {
 	return operation.StartWorkflow(ctx, c, client.StartWorkflowOptions{
 		ID: "provision-cell-" + input.CellID,
 	}, MyHandlerWorkflow, input)
 })
 
-var queryOp = operation.NewSyncOperation("get-cell-status", func(ctx context.Context, c client.Client, input MyInput) (MyOutput, error) {
+var queryOp = operation.NewSync("get-cell-status", func(ctx context.Context, c client.Client, input MyInput) (MyOutput, error) {
 	payload, _ := c.QueryWorkflow(ctx, "provision-cell-"+input.CellID, "", "get-cell-status")
 	var output MyOutput
 	return output, payload.Get(&output)
 })
 
-var signalOp = operation.NewSyncOperation("set-cell-status", func(ctx context.Context, c client.Client, input MyInput) (operation.NoResult, error) {
+var signalOp = operation.NewSync("set-cell-status", func(ctx context.Context, c client.Client, input MyInput) (operation.NoResult, error) {
 	return operation.NoResult{}, c.SignalWorkflow(ctx, "provision-cell-"+input.CellID, "", "set-cell-status", input)
 })
 

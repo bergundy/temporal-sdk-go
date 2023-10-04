@@ -27,36 +27,36 @@ type OperationHandler[I, O any] interface {
 	Handler
 }
 
-type WorkflowOperation[I, O any] struct {
+type WorkflowRun[I, O any] struct {
 	nexus.UnimplementedHandler
 
-	Name     string
-	Workflow func(shared.Context, I) (O, error)
-	Options  func(context.Context, I) client.StartWorkflowOptions
-	Start    func(context.Context, client.Client, I) (*WorkflowHandle[O], error)
+	Name       string
+	Workflow   func(shared.Context, I) (O, error)
+	GetOptions func(context.Context, I) (client.StartWorkflowOptions, error)
+	Start      func(context.Context, client.Client, I) (*WorkflowHandle[O], error)
 }
 
-func NewWorkflowOperation[I, O any](name string, start func(context.Context, client.Client, I) (*WorkflowHandle[O], error)) *WorkflowOperation[I, O] {
-	return &WorkflowOperation[I, O]{
+func NewWorkflowRun[I, O any](name string, start func(context.Context, client.Client, I) (*WorkflowHandle[O], error)) *WorkflowRun[I, O] {
+	return &WorkflowRun[I, O]{
 		Name:  name,
 		Start: start,
 	}
 }
 
 // GetResultMapper implements Handler.
-func (*WorkflowOperation[I, O]) GetResultMapper() func(context.Context, any, error) (any, error) {
+func (*WorkflowRun[I, O]) GetResultMapper() func(context.Context, any, error) (any, error) {
 	return nil
 }
 
 // GetName implements Operation.
-func (h *WorkflowOperation[I, O]) GetName() string {
+func (h *WorkflowRun[I, O]) GetName() string {
 	return h.Name
 }
 
 // call implements Operation.
-func (*WorkflowOperation[I, O]) io(I, O) {}
+func (*WorkflowRun[I, O]) io(I, O) {}
 
-var _ OperationHandler[any, any] = (*WorkflowOperation[any, any])(nil)
+var _ OperationHandler[any, any] = (*WorkflowRun[any, any])(nil)
 
 type MappedResultHandler[I, M, O any] struct {
 	nexus.UnimplementedHandler
@@ -89,40 +89,40 @@ func (*MappedResultHandler[I, M, O]) io(I, O) {}
 
 var _ OperationHandler[any, any] = (*MappedResultHandler[any, any, any])(nil)
 
-type SyncOperation[I any, O any] struct {
+type Sync[I any, O any] struct {
 	nexus.UnimplementedHandler
 
 	Name    string
 	Handler func(context.Context, client.Client, I) (O, error)
 }
 
-func NewSyncOperation[I any, O any](name string, handler func(context.Context, client.Client, I) (O, error)) *SyncOperation[I, O] {
-	return &SyncOperation[I, O]{
+func NewSync[I any, O any](name string, handler func(context.Context, client.Client, I) (O, error)) *Sync[I, O] {
+	return &Sync[I, O]{
 		Name:    name,
 		Handler: handler,
 	}
 }
 
 // GetResultMapper implements Handler.
-func (*SyncOperation[I, O]) GetResultMapper() func(context.Context, any, error) (any, error) {
+func (*Sync[I, O]) GetResultMapper() func(context.Context, any, error) (any, error) {
 	return nil
 }
 
 // io implements Operation.
-func (*SyncOperation[I, O]) io(I, O) {}
+func (*Sync[I, O]) io(I, O) {}
 
 // GetName implements Operation.
-func (h *SyncOperation[I, O]) GetName() string {
+func (h *Sync[I, O]) GetName() string {
 	return h.Name
 }
 
 // StartOperation implements Handler.
-func (*SyncOperation[I, O]) StartOperation(context.Context, *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
+func (*Sync[I, O]) StartOperation(context.Context, *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
 	panic("unimplemented")
 }
 
-var _ Operation[any, any] = (*SyncOperation[any, any])(nil)
-var _ Handler = (*SyncOperation[any, any])(nil)
+var _ Operation[any, any] = (*Sync[any, any])(nil)
+var _ Handler = (*Sync[any, any])(nil)
 
 type VoidOperation[I any] struct {
 	nexus.UnimplementedHandler
@@ -155,31 +155,7 @@ var _ Operation[any, NoResult] = (*VoidOperation[any])(nil)
 var _ Handler = (*VoidOperation[any])(nil)
 
 type WorkflowHandle[R any] struct {
-	nexus.UnimplementedHandler
-
 	ID string
-}
-
-func (h *WorkflowHandle[R]) GetOperationID() string {
-	return h.ID
-}
-
-func (h *WorkflowHandle[R]) GetOperationResult(ctx context.Context, request *nexus.GetOperationResultRequest) (R, error) {
-	panic("TODO")
-}
-
-// GetOperationInfo implements the Handler interface.
-func (h *WorkflowHandle[R]) GetOperationInfo(ctx context.Context, request *nexus.GetOperationInfoRequest) (*nexus.OperationInfo, error) {
-	panic("TODO")
-}
-
-// CancelOperation implements the Handler interface.
-func (h *WorkflowHandle[R]) CancelOperation(ctx context.Context, request *nexus.CancelOperationRequest) error {
-	panic("TODO")
-}
-
-func GetClient(ctx context.Context) client.Client {
-	return getContext(ctx).client
 }
 
 func StartWorkflow[I, O any, WF func(shared.Context, I) (O, error)](ctx context.Context, c client.Client, options client.StartWorkflowOptions, workflow WF, arg I) (*WorkflowHandle[O], error) {
