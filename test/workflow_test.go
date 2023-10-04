@@ -2504,40 +2504,40 @@ func MyHandlerWorkflow(ctx workflow.Context, input MyInput) (MyOutput, error) {
 	return MyOutput{}, nil
 }
 
-var startWorkflowOp = operation.NewAsyncOperation("provision-cell", func(ctx context.Context, input MyInput) (*operation.WorkflowHandle[MyOutput], error) {
-	return operation.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-		ID: fmt.Sprintf("provision-cell-%s", input.CellID),
+var startWorkflowOp = operation.NewAsyncHandler("provision-cell", func(ctx context.Context, input MyInput) (*operation.WorkflowHandle[MyOutput], error) {
+	return operation.StartWorkflow(ctx, client.StartWorkflowOptions{
+		ID: "provision-cell-" + input.CellID,
 	}, MyHandlerWorkflow, input)
 })
 
-var startWorkflowWithMapperOp = operation.NewAsyncMappedOperation(
-	"provision-cell",
-	func(ctx context.Context, input MyInput) (*operation.WorkflowHandle[MyIntermediateOutput], error) {
-		return operation.ExecuteUntypedWorkflow[MyIntermediateOutput](ctx, client.StartWorkflowOptions{
-			ID: fmt.Sprintf("provision-cell-%s", input.CellID),
-		}, "provision-cell", input)
-	},
-	func(ctx context.Context, result MyIntermediateOutput, err error) (MyOutput, error) {
-		return MyOutput{}, nil
-	},
-)
-
-var startWorkflowWithMapperOp2 = operation.WithResultMapper(
+var startWorkflowWithMapperOp = operation.WithResultMapper(
 	startWorkflowOp,
 	func(ctx context.Context, result MyOutput, err error) (MyMappedOutput, error) {
 		return MyMappedOutput{}, nil
 	},
 )
 
-var queryOp = operation.NewSyncClientOperation("get-cell-status", func(ctx context.Context, input MyInput, c client.Client) (MyOutput, error) {
-	payload, _ := c.QueryWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "get-cell-status")
+var queryOp = operation.NewSyncHandler("get-cell-status", func(ctx context.Context, input MyInput) (MyOutput, error) {
+	payload, _ := operation.GetClient(ctx).QueryWorkflow(ctx, "provision-cell-"+input.CellID, "", "get-cell-status")
 	var output MyOutput
 	return output, payload.Get(&output)
 })
 
-var signalOp = operation.NewVoidClientOperation("set-cell-status", func(ctx context.Context, input MyInput, c client.Client) error {
-	return c.SignalWorkflow(ctx, fmt.Sprintf("provision-cell-%s", input.CellID), "", "set-cell-status", input)
+var signalOp = operation.NewVoidHandler("set-cell-status", func(ctx context.Context, input MyInput) error {
+	return operation.GetClient(ctx).SignalWorkflow(ctx, "provision-cell-"+input.CellID, "", "set-cell-status", input)
 })
+
+var startWorkflowWithMapperOp2 = operation.NewAsyncHandlerWithResultMapper(
+	"provision-cell",
+	func(ctx context.Context, input MyInput) (*operation.WorkflowHandle[MyIntermediateOutput], error) {
+		return operation.StartUntypedWorkflow[MyIntermediateOutput](ctx, client.StartWorkflowOptions{
+			ID: "provision-cell-" + input.CellID,
+		}, "provision-cell", input)
+	},
+	func(ctx context.Context, result MyIntermediateOutput, err error) (MyOutput, error) {
+		return MyOutput{}, nil
+	},
+)
 
 func TestRegisterOperation(T *testing.T) {
 	c, _ := client.Dial(client.Options{})
