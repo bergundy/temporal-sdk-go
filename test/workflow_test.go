@@ -26,10 +26,12 @@ package test_test
 
 import (
 	"context"
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"log"
 	"math/rand"
+	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -37,11 +39,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
+	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/internal"
 	"go.temporal.io/sdk/operation"
 	"go.temporal.io/sdk/temporal"
@@ -2508,25 +2512,25 @@ var startWorkflowSimple = operation.WorkflowRun[MyInput, MyOutput]{
 	Workflow: MyHandlerWorkflow,
 	GetOptions: func(ctx context.Context, input MyInput) (client.StartWorkflowOptions, error) {
 		return client.StartWorkflowOptions{
-			ID: "provision-cell-" + input.CellID,
+			ID: constructID(ctx, "provision-cell", input.CellID),
 		}, nil
 	},
 }
 
 var startWorkflowOp = operation.NewWorkflowRun("provision-cell", func(ctx context.Context, c client.Client, input MyInput) (operation.WorkflowHandle[MyOutput], error) {
 	return operation.StartWorkflow(ctx, c, client.StartWorkflowOptions{
-		ID: "provision-cell-" + input.CellID,
+		ID: constructID(ctx, "provision-cell", input.CellID),
 	}, MyHandlerWorkflow, input)
 })
 
 var queryOp = operation.NewSync("get-cell-status", func(ctx context.Context, c client.Client, input MyInput) (MyOutput, error) {
-	payload, _ := c.QueryWorkflow(ctx, "provision-cell-"+input.CellID, "", "get-cell-status")
+	payload, _ := c.QueryWorkflow(ctx, constructID(ctx, "provision-cell", input.CellID), "", "get-cell-status")
 	var output MyOutput
 	return output, payload.Get(&output)
 })
 
 var signalOp = operation.NewSync("set-cell-status", func(ctx context.Context, c client.Client, input MyInput) (operation.NoResult, error) {
-	return nil, c.SignalWorkflow(ctx, "provision-cell-"+input.CellID, "", "set-cell-status", input)
+	return nil, c.SignalWorkflow(ctx, constructID(ctx, "provision-cell", input.CellID), "", "set-cell-status", input)
 })
 
 var startWorkflowWithMapperOp = operation.WithResultMapper(
@@ -2538,7 +2542,7 @@ var startWorkflowWithMapperOp = operation.WithResultMapper(
 
 func TestRegisterOperation(T *testing.T) {
 	c, _ := client.Dial(client.Options{})
-	w := worker.New(c, "my-task-queue", worker.Options{})
+	w := worker.New(c, "my-task-queue", worker.Options{Interceptors: []interceptor.WorkerInterceptor{&OperationAuthorizationInterceptor{}}})
 
 	w.RegisterOperation(startWorkflowOp)
 	w.RegisterOperation(startWorkflowWithMapperOp)
@@ -2559,22 +2563,68 @@ func MyCallerWorkflow(ctx workflow.Context) (MyOutput, error) {
 	return handle.GetResult(ctx)
 }
 
-// func getTenantID(context.Context, http.Header) (string, error) {
-// 	return "", nil
-// }
+type tenantIDKey struct{}
+type operationKey struct{}
 
-// type OperationAuthorizationInterceptor struct {
-// 	OperationInboundInterceptorBase
-// }
+func constructID(ctx context.Context, operation string, parts ...string) string {
+	tenantID := ctx.Value(tenantIDKey{}).(string)
 
-// func (*OperationAuthorizationInterceptor) CancelOperation(ctx context.Context, request *CancelOperationRequest) error {
-// 	tenantID, err := getTenantID(ctx, request.Header)
-// 	if err != nil {
-// 		return UnauthorizedError("unauthorized access")
-// 	}
+	return operation + "-" + tenantID + "-" + strings.Join(parts, "-")
+}
 
-// 	if !strings.HasPrefix(request.OperationID, fmt.Sprintf("%s-%s-", request.Operation, tenantID)) {
-// 		return &nexus.HandlerError{StatusCode: http.StatusUnauthorized, Failure: &nexus.Failure{Message: "unauthorized access"}}
-// 	}
-// 	return nil
-// }
+func hashSource(s string) string {
+	sum := sha1.Sum([]byte(s))
+	return fmt.Sprintf("%x", sum[:8])
+}
+
+type OperationAuthorizationInterceptor struct {
+	interceptor.WorkerInterceptorBase
+	interceptor.OperationInboundInterceptorBase
+	interceptor.OperationOutboundInterceptorBase
+}
+
+func (i *OperationAuthorizationInterceptor) getTenantID(h http.Header) (string, error) {
+	source := h.Get("Temporal-Source-Namespace")
+	if source == "" {
+		return "", operation.NewUnauthorizedError("unauthorized access")
+	}
+	return hashSource(source), nil
+}
+
+func (i *OperationAuthorizationInterceptor) StartOperation(ctx context.Context, request *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
+	tenantID, err := i.getTenantID(request.HTTPRequest.Header)
+	if err != nil {
+		return nil, err
+	}
+	ctx = context.WithValue(ctx, tenantIDKey{}, tenantID)
+	ctx = context.WithValue(ctx, operationKey{}, request.Operation)
+	return i.OperationInboundInterceptorBase.Next.StartOperation(ctx, request)
+}
+
+func (i *OperationAuthorizationInterceptor) CancelOperation(ctx context.Context, request *nexus.CancelOperationRequest) error {
+	tenantID, err := i.getTenantID(request.HTTPRequest.Header)
+	if err != nil {
+		return err
+	}
+
+	if !strings.HasPrefix(request.OperationID, fmt.Sprintf("%s:%s:", request.Operation, tenantID)) {
+		return operation.NewUnauthorizedError("unauthorized access")
+	}
+	return i.OperationInboundInterceptorBase.Next.CancelOperation(ctx, request)
+}
+
+func (i *OperationAuthorizationInterceptor) ExecuteOperation(ctx context.Context, input *interceptor.ClientExecuteWorkflowInput) (client.WorkflowRun, error) {
+	operation := ctx.Value(operationKey{}).(string)
+
+	if !strings.HasPrefix(input.Options.ID, constructID(ctx, operation)) {
+		return nil, errors.New("Workflow ID does not match expected format")
+	}
+
+	return i.OperationOutboundInterceptorBase.Next.ExecuteOperation(ctx, input)
+}
+
+type ReencryptionInterceptor struct {
+	interceptor.WorkerInterceptorBase
+	interceptor.OperationInboundInterceptorBase
+	interceptor.OperationOutboundInterceptorBase
+}

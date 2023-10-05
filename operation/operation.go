@@ -19,18 +19,23 @@ type Operation[I, O any] interface {
 	io(I, O)
 }
 
+type MapCompletionRequest struct {
+	Context    map[string]string
+	Completion nexus.OperationCompletion
+}
+
 // OperationHandler is a handler for a single operation.
 type OperationHandler[I, O any] interface {
 	Operation[I, O]
 	nexus.Handler
-	MapCompletion(context.Context, nexus.OperationCompletion) (nexus.OperationCompletion, error)
+	MapCompletion(context.Context, *MapCompletionRequest) (nexus.OperationCompletion, error)
 }
 
 type unimplementedHandler struct {
 	nexus.Handler
 }
 
-func (*unimplementedHandler) MapCompletion(context.Context, nexus.OperationCompletion) (nexus.OperationCompletion, error) {
+func (*unimplementedHandler) MapCompletion(context.Context, *MapCompletionRequest) (nexus.OperationCompletion, error) {
 	return nil, NewNotFoundError("cannot map completion")
 }
 
@@ -121,8 +126,8 @@ func WithFailureMapper[I, M, O any](op OperationHandler[I, M], mapper func(conte
 	}
 }
 
-func (h *MappedCompletionHandler[I, M, O]) MapCompletion(ctx context.Context, completion nexus.OperationCompletion) (nexus.OperationCompletion, error) {
-	switch t := completion.(type) {
+func (h *MappedCompletionHandler[I, M, O]) MapCompletion(ctx context.Context, request *MapCompletionRequest) (nexus.OperationCompletion, error) {
+	switch t := request.Completion.(type) {
 	case *nexus.OperationCompletionSuccessful:
 		payload, err := httpToPayload(t.Header, t.Body)
 		if err != nil {
@@ -140,6 +145,7 @@ func (h *MappedCompletionHandler[I, M, O]) MapCompletion(ctx context.Context, co
 		if err != nil {
 			return nil, err
 		}
+		// TODO: how would this encrypt based on the context?
 		payload, err = dc.ToPayload(o)
 		if err != nil {
 			return nil, err
@@ -161,8 +167,9 @@ func (h *MappedCompletionHandler[I, M, O]) MapCompletion(ctx context.Context, co
 }
 
 func (h *MappedCompletionHandler[I, M, O]) StartOperation(ctx context.Context, request *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
-	getContext(ctx).requiresResultMapping = h.ResultMapper != nil
-	getContext(ctx).requiresFailureMapping = h.FailureMapper != nil
+	c := getContext(ctx)
+	c.requiresResultMapping = c.requiresResultMapping || h.ResultMapper != nil
+	c.requiresFailureMapping = c.requiresFailureMapping || h.FailureMapper != nil
 	return h.Handler.StartOperation(ctx, request)
 }
 

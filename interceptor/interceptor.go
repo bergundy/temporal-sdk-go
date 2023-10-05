@@ -210,6 +210,9 @@ type ScheduleClientCreateInput = internal.ScheduleClientCreateInput
 // ClientOutoundInterceptor.UpdateWorkflow.
 type ClientUpdateWorkflowInput = internal.ClientUpdateWorkflowInput
 
+type OperationInboundInterceptorBase = internal.OperationInboundInterceptorBase
+type OperationOutboundInterceptorBase = internal.OperationOutboundInterceptorBase
+
 // Header provides Temporal header information from the context for reading or
 // writing during specific interceptor calls.
 //
