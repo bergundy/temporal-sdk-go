@@ -2542,7 +2542,7 @@ var startWorkflowWithMapperOp = operation.WithResultMapper(
 
 func TestRegisterOperation(T *testing.T) {
 	c, _ := client.Dial(client.Options{})
-	w := worker.New(c, "my-task-queue", worker.Options{Interceptors: []interceptor.WorkerInterceptor{&OperationAuthorizationInterceptor{}}})
+	w := worker.New(c, "my-task-queue", worker.Options{Interceptors: []interceptor.WorkerInterceptor{&OperationAuthorizationInterceptor{}, &ReencryptionInterceptor{}}})
 
 	w.RegisterOperation(startWorkflowOp)
 	w.RegisterOperation(startWorkflowWithMapperOp)
@@ -2623,8 +2623,34 @@ func (i *OperationAuthorizationInterceptor) ExecuteOperation(ctx context.Context
 	return i.OperationOutboundInterceptorBase.Next.ExecuteOperation(ctx, input)
 }
 
+type encryptionKeyKey struct{}
+
 type ReencryptionInterceptor struct {
 	interceptor.WorkerInterceptorBase
 	interceptor.OperationInboundInterceptorBase
 	interceptor.OperationOutboundInterceptorBase
+}
+
+func (i *ReencryptionInterceptor) StartOperation(ctx context.Context, request *nexus.StartOperationRequest) (nexus.OperationResponse, error) {
+	responseEncryptionKey := request.HTTPRequest.Header.Get("Response-Encryption-Key")
+	if responseEncryptionKey != "" {
+		ctx = context.WithValue(ctx, encryptionKeyKey{}, responseEncryptionKey)
+	}
+
+	return i.OperationInboundInterceptorBase.Next.StartOperation(ctx, request)
+}
+
+func (i *ReencryptionInterceptor) ExecuteOperation(ctx context.Context, input *interceptor.ClientExecuteWorkflowInput) (client.WorkflowRun, error) {
+	if _, ok := ctx.Value(encryptionKeyKey{}).(string); ok {
+		opts := *input.Options
+		input.Options = &opts
+		// TODO: inject the key into the callback context.
+		return i.OperationOutboundInterceptorBase.Next.ExecuteOperation(ctx, input)
+	}
+
+	return i.OperationOutboundInterceptorBase.Next.ExecuteOperation(ctx, input)
+}
+
+func (i *ReencryptionInterceptor) MapCompletion(ctx context.Context, request *MapCompletionRequest) (nexus.OperationCompletion, error) {
+	// converter.NewEnc
 }

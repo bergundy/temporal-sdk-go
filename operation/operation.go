@@ -28,6 +28,7 @@ type MapCompletionRequest struct {
 type OperationHandler[I, O any] interface {
 	Operation[I, O]
 	nexus.Handler
+	// TODO: this should be interceptable
 	MapCompletion(context.Context, *MapCompletionRequest) (nexus.OperationCompletion, error)
 }
 
@@ -87,7 +88,7 @@ func (h *WorkflowRun[I, O]) StartOperation(ctx context.Context, request *nexus.S
 	}
 
 	var i I
-	dc := getContext(ctx).dataConverter
+	dc := GetDataConverter(ctx)
 	if err := dc.FromPayload(payload, &i); err != nil {
 		// log actual error?
 		return nil, NewBadRequestError("invalid request payload")
@@ -134,7 +135,7 @@ func (h *MappedCompletionHandler[I, M, O]) MapCompletion(ctx context.Context, re
 			// log actual error?
 			return nil, NewBadRequestError("invalid request payload")
 		}
-		dc := getContext(ctx).dataConverter
+		dc := GetDataConverter(ctx)
 		var i M
 		err = dc.FromPayload(payload, &i)
 		if err != nil {
@@ -221,7 +222,7 @@ func (h *Sync[I, O]) StartOperation(ctx context.Context, request *nexus.StartOpe
 	}
 
 	var i I
-	dc := getContext(ctx).dataConverter
+	dc := GetDataConverter(ctx)
 	if err := dc.FromPayload(payload, &i); err != nil {
 		// log actual error?
 		return nil, NewBadRequestError("invalid request payload")
@@ -275,7 +276,7 @@ func StartUntypedWorkflow[R any](ctx context.Context, c client.Client, options c
 }
 
 func getContext(ctx context.Context) *operationContext {
-	if cx, ok := ctx.Value(contextKeyOperationState).(*operationContext); ok {
+	if cx, ok := ctx.Value(contextKeyOperationState{}).(*operationContext); ok {
 		return cx
 	}
 	// Panic?
@@ -289,7 +290,18 @@ type operationContext struct {
 	requiresFailureMapping bool
 }
 
-var contextKeyOperationState = struct{}{}
+func GetDataConverter(ctx context.Context) converter.DataConverter {
+	return getContext(ctx).dataConverter
+}
+
+func WithDataConverter(ctx context.Context, conv converter.DataConverter) context.Context {
+	c := getContext(ctx)
+	cc := *c
+	cc.dataConverter = conv
+	return context.WithValue(ctx, contextKeyOperationState{}, &cc)
+}
+
+type contextKeyOperationState = struct{}
 
 func httpToPayload(header http.Header, body io.Reader) (*commonpb.Payload, error) {
 	panic("TODO")
@@ -298,3 +310,35 @@ func httpToPayload(header http.Header, body io.Reader) (*commonpb.Payload, error
 func payloadToHTTP(*commonpb.Payload) (http.Header, io.Reader, error) {
 	panic("TODO")
 }
+
+type encryptionPayloadCodec struct {
+	key string
+}
+
+// Decode implements converter.PayloadCodec.
+func (*encryptionPayloadCodec) Decode([]*commonpb.Payload) ([]*commonpb.Payload, error) {
+	panic("unimplemented")
+}
+
+// Encode implements converter.PayloadCodec.
+func (*encryptionPayloadCodec) Encode([]*commonpb.Payload) ([]*commonpb.Payload, error) {
+	panic("unimplemented")
+}
+
+var _ converter.PayloadCodec = &encryptionPayloadCodec{}
+
+type decodeOnlyCodec struct {
+	inner converter.PayloadCodec
+}
+
+// Decode implements converter.PayloadCodec.
+func (c *decodeOnlyCodec) Decode(ps []*commonpb.Payload) ([]*commonpb.Payload, error) {
+	return c.inner.Decode(ps)
+}
+
+// Encode implements converter.PayloadCodec.
+func (*decodeOnlyCodec) Encode(ps []*commonpb.Payload) ([]*commonpb.Payload, error) {
+	return ps, nil
+}
+
+var _ converter.PayloadCodec = &decodeOnlyCodec{}

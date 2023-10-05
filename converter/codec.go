@@ -241,6 +241,14 @@ func (e *CodecDataConverter) ToString(payload *commonpb.Payload) string {
 	return e.parent.ToString(decodedPayloads[0])
 }
 
+func StripCodecs(c DataConverter) (DataConverter, []PayloadCodec) {
+	if c, ok := c.(*CodecDataConverter); ok {
+		stripped, codecs := StripCodecs(c.parent)
+		return stripped, append(codecs, c.codecs...)
+	}
+	return c, nil
+}
+
 // ToStrings implements DataConverter.ToStrings using ToString for each value.
 func (e *CodecDataConverter) ToStrings(payloads *commonpb.Payloads) []string {
 	if payloads == nil {
