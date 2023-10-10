@@ -1,4 +1,6 @@
-package operation
+package temporalnexus
+
+// TODO: move all of this into Nexus
 
 type Error interface {
 	error

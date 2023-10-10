@@ -26,12 +26,14 @@ package workflow
 
 import (
 	"errors"
+	"fmt"
+	"time"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/internal"
 	"go.temporal.io/sdk/internal/common/metrics"
 	"go.temporal.io/sdk/log"
-	"go.temporal.io/sdk/operation"
 )
 
 type (
@@ -647,11 +649,57 @@ type VoidOperationHandle interface {
 	WaitCompleted(Context) error
 }
 
-func StartOperation[I any, R any](ctx Context, op operation.Operation[I, R], input I) (OperationHandle[R], error) {
-	panic("unimplemented")
+type operationHandle[T any] struct {
+	operationID string
+	state       nexus.OperationState
+	result      T
+	err         error
 }
 
-func StartVoidOperation[I any](ctx Context, op operation.Operation[I, operation.NoResult], input I) (VoidOperationHandle, error) {
+// GetResult implements OperationHandle.
+func (h *operationHandle[T]) GetResult(ctx Context) (T, error) {
+	err := Await(ctx, func() bool {
+		return h.state != nexus.OperationState("") && h.state != nexus.OperationStateRunning
+	})
+	if err != nil {
+		return h.result, err
+	}
+	return h.result, h.err
+}
+
+// WaitStarted implements OperationHandle.
+func (h *operationHandle[T]) WaitStarted(ctx Context) error {
+	return Await(ctx, func() bool {
+		return h.state != nexus.OperationState("")
+	})
+}
+
+var _ OperationHandle[any] = &operationHandle[any]{}
+
+func StartOperation[I any, R any](ctx Context, op nexus.Operation[I, R], input I) (OperationHandle[R], error) {
+	// TODO: incremental sequence
+	operationSequence := 1
+	info := GetInfo(ctx)
+	ctx = WithActivityOptions(ctx, ActivityOptions{
+		TaskQueue:           info.TaskQueueName,
+		StartToCloseTimeout: time.Second * 3,
+	})
+	future := ExecuteActivity(ctx, "start-operation", input)
+	handle := &operationHandle[R]{}
+	Go(ctx, func(ctx Context) {
+		// TODO: handle this and support sync
+		_ = future.Get(ctx, &handle.operationID)
+		// TODO: support unsuccessful completion
+		ch := GetSignalChannel(ctx, fmt.Sprintf("operation-%v", operationSequence))
+		var r R
+		ch.Receive(ctx, &r)
+		handle.result = r
+		handle.state = nexus.OperationStateSucceeded
+	})
+	return handle, nil
+}
+
+func StartVoidOperation[I any](ctx Context, op nexus.Operation[I, nexus.NoResult], input I) (VoidOperationHandle, error) {
 	panic("unimplemented")
 }
 

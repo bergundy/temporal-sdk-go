@@ -73,7 +73,6 @@ type (
 	Registry interface {
 		WorkflowRegistry
 		ActivityRegistry
-		OperationRegistry
 	}
 
 	// WorkflowRegistry exposes workflow registration functions to consumers.
@@ -149,10 +148,6 @@ type (
 		// which might be useful for integration tests.
 		// worker.RegisterActivityWithOptions(barActivity, RegisterActivityOptions{DisableAlreadyRegisteredCheck: true})
 		RegisterActivityWithOptions(a interface{}, options activity.RegisterOptions)
-	}
-
-	OperationRegistry interface {
-		RegisterOperation(internal.OperationHandler)
 	}
 
 	// WorkflowReplayer supports replaying a workflow from its event history.

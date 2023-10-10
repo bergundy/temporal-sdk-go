@@ -609,6 +609,14 @@ type (
 		//
 		// NOTE: Experimental
 		EnableEagerStart bool
+
+		// TODO
+		// NOTE: Experimental
+		CallbackURL string
+
+		// TODO
+		// NOTE: Experimental
+		RequestID string
 	}
 
 	// RetryPolicy defines the retry policy.

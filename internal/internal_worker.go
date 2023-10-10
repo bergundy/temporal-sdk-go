@@ -147,11 +147,16 @@ type (
 		// Defines how many concurrent workflow task executions by this worker.
 		ConcurrentWorkflowTaskExecutionSize int
 
+		ConcurrentNexusTaskExecutionSize int
+
 		// MaxConcurrentWorkflowTaskQueuePollers is the max number of pollers for workflow task queue.
 		MaxConcurrentWorkflowTaskQueuePollers int
 
 		// Defines how many concurrent local activity executions by this worker.
 		ConcurrentLocalActivityExecutionSize int
+
+		// MaxConcurrentNexusTaskQueuePollers is the max number of concurrent nexus task queue pollers.
+		MaxConcurrentNexusTaskQueuePollers int
 
 		// Defines rate limiting on number of local activities that can be executed per second per worker.
 		WorkerLocalActivitiesPerSecond float64
@@ -897,6 +902,7 @@ type AggregatedWorker struct {
 	client         *WorkflowClient
 	workflowWorker *workflowWorker
 	activityWorker *activityWorker
+	nexusWorker    *nexusWorker
 	sessionWorker  *sessionWorker
 	logger         log.Logger
 	registry       *registry
@@ -980,6 +986,28 @@ func (aw *AggregatedWorker) Start() error {
 				if aw.activityWorker.worker.isWorkerStarted {
 					aw.activityWorker.Stop()
 				}
+			}
+			return err
+		}
+	}
+	if !util.IsInterfaceNil(aw.nexusWorker) {
+		aw.logger.Info("Starting nexus worker")
+		if err := aw.nexusWorker.Start(); err != nil {
+			// stop workflow worker and activity worker.
+			if !util.IsInterfaceNil(aw.workflowWorker) {
+				if aw.workflowWorker.worker.isWorkerStarted {
+					aw.workflowWorker.Stop()
+				}
+			}
+			if !util.IsInterfaceNil(aw.activityWorker) {
+				if aw.activityWorker.worker.isWorkerStarted {
+					aw.activityWorker.Stop()
+				}
+			}
+			if !util.IsInterfaceNil(aw.sessionWorker) {
+				// TODO: should there be a check here?
+				// NOTE: this is getting ugly, should use defer instead.
+				aw.sessionWorker.Stop()
 			}
 			return err
 		}
@@ -1513,7 +1541,9 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
 		ConcurrentLocalActivityExecutionSize:  options.MaxConcurrentLocalActivityExecutionSize,
 		WorkerLocalActivitiesPerSecond:        options.WorkerLocalActivitiesPerSecond,
 		ConcurrentWorkflowTaskExecutionSize:   options.MaxConcurrentWorkflowTaskExecutionSize,
+		ConcurrentNexusTaskExecutionSize:      options.MaxConcurrentNexusTaskExecutionSize,
 		MaxConcurrentWorkflowTaskQueuePollers: options.MaxConcurrentWorkflowTaskPollers,
+		MaxConcurrentNexusTaskQueuePollers:    options.MaxConcurrentNexusTaskPollers,
 		Identity:                              client.identity,
 		WorkerBuildID:                         options.BuildID,
 		UseBuildIDForVersioning:               options.UseBuildIDForVersioning,
@@ -1592,10 +1622,26 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
 		})
 	}
 
+	var nexusWorker *nexusWorker
+	if len(options.NexusOperations) > 0 {
+		var err error
+
+		nexusWorker, err = newNexusWorker(nexusWorkerOptions{
+			executionParameters: workerParams,
+			workflowService:     client.workflowService,
+			operations:          options.NexusOperations,
+			client:              client,
+		})
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	aw = &AggregatedWorker{
 		client:         client,
 		workflowWorker: workflowWorker,
 		activityWorker: activityWorker,
+		nexusWorker:    nexusWorker,
 		sessionWorker:  sessionWorker,
 		logger:         workerParams.Logger,
 		registry:       registry,
@@ -1736,6 +1782,12 @@ func setWorkerOptionsDefaults(options *WorkerOptions) {
 	}
 	if options.MaxHeartbeatThrottleInterval == 0 {
 		options.MaxHeartbeatThrottleInterval = defaultMaxHeartbeatThrottleInterval
+	}
+	if options.MaxConcurrentNexusTaskExecutionSize == 0 {
+		options.MaxConcurrentNexusTaskExecutionSize = defaultMaxConcurrentTaskExecutionSize
+	}
+	if options.MaxConcurrentNexusTaskPollers == 0 {
+		options.MaxConcurrentNexusTaskPollers = defaultConcurrentPollRoutineSize
 	}
 }
 

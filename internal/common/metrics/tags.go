@@ -67,6 +67,14 @@ func LocalActivityTags(workflowType, activityType string) map[string]string {
 	}
 }
 
+// ActivityTags returns a set of tags for activities.
+func NexusTags(operationType, taskQueueName string) map[string]string {
+	return map[string]string{
+		OperationTypeNameTagName: operationType,
+		TaskQueueTagName:         taskQueueName,
+	}
+}
+
 // TaskQueueTags returns a set of tags for a task queue.
 func TaskQueueTags(taskQueue string) map[string]string {
 	return map[string]string{

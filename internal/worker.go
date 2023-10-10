@@ -27,6 +27,8 @@ package internal
 import (
 	"context"
 	"time"
+
+	"github.com/nexus-rpc/sdk-go/nexus"
 )
 
 type (
@@ -85,6 +87,8 @@ type (
 		// default: defaultMaxConcurrentTaskExecutionSize(1k)
 		MaxConcurrentWorkflowTaskExecutionSize int
 
+		MaxConcurrentNexusTaskExecutionSize int
+
 		// Optional: Sets the maximum number of goroutines that will concurrently poll the
 		// temporal-server to retrieve workflow tasks. Changing this value will affect the
 		// rate at which the worker is able to consume tasks from a task queue. Due to
@@ -92,6 +96,10 @@ type (
 		// value cannot be 1 and will panic if set to that value.
 		// default: 2
 		MaxConcurrentWorkflowTaskPollers int
+
+		// TODO: document
+		// NOTE: Experimental
+		MaxConcurrentNexusTaskPollers int
 
 		// Optional: Enable logging in replay.
 		// In the workflow code you can use workflow.GetLogger(ctx) to write logs. By default, the logger will skip log
@@ -240,8 +248,9 @@ type (
 		// NOTE: Experimental
 		UseBuildIDForVersioning bool
 
-		// ...
-		NexusCallbackURL string
+		// TODO: document me
+		// NOTE: Experimental
+		NexusOperations []nexus.UntypedOperationHandler
 	}
 )
 
