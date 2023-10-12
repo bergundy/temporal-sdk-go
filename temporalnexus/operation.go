@@ -2,12 +2,8 @@ package temporalnexus
 
 import (
 	"context"
-	"fmt"
-	"io"
-	"net/http"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
-	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/internal"
 )
@@ -29,7 +25,7 @@ type WorkflowRunOptions[I, O any] struct {
 	// TODO: consider just client.WorkflowRun
 	Start func(context.Context, client.Client, I) (WorkflowHandle[O], error)
 
-	// TODO: consider removing this
+	// Alternative:
 	Workflow   func(internal.Context, I) (O, error)
 	GetOptions func(context.Context, I) (client.StartWorkflowOptions, error)
 }
@@ -56,11 +52,25 @@ func (*workflowRunHandler[I, O]) GetResult(context.Context, string) (O, error) {
 
 // Start implements nexus.AsyncOperationHandler.
 func (h *workflowRunHandler[I, O]) Start(ctx context.Context, input I) (*nexus.OperationResponseAsync, error) {
-	handle, err := h.options.Start(ctx, internal.GetClient(ctx), input)
-	if err != nil {
-		return nil, err
+	c := internal.GetClient(ctx)
+	// TODO: this should be validated sooner along with GetOptions
+	if h.options.Workflow != nil {
+		opts, err := h.options.GetOptions(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		handle, err := StartWorkflow(ctx, c, opts, h.options.Workflow, input)
+		if err != nil {
+			return nil, err
+		}
+		return &nexus.OperationResponseAsync{OperationID: handle.GetID()}, nil
+	} else {
+		handle, err := h.options.Start(ctx, c, input)
+		if err != nil {
+			return nil, err
+		}
+		return &nexus.OperationResponseAsync{OperationID: handle.GetID()}, nil
 	}
-	return &nexus.OperationResponseAsync{OperationID: handle.GetID()}, nil
 }
 
 var _ nexus.AsyncOperationHandler[any, any] = &workflowRunHandler[any, any]{}
@@ -99,10 +109,11 @@ func StartWorkflow[I, O any, WF func(internal.Context, I) (O, error)](ctx contex
 	req := internal.GetStartOperationRequest(ctx)
 	options.RequestID = req.RequestID
 	options.CallbackURL = req.CallbackURL
-	options.TaskQueue = "my-task-queue" // TODO: need this on the context (or better yet on the service)
+	if options.TaskQueue == "" {
+		options.TaskQueue = internal.GetTaskQueue(ctx)
+	}
 	run, err := c.ExecuteWorkflow(ctx, options, workflow, arg)
 	if err != nil {
-		fmt.Println("Start workflow error", err)
 		return nil, err
 	}
 	return workflowHandle[O]{id: run.GetID()}, nil
@@ -113,12 +124,4 @@ func StartUntypedWorkflow[R any](ctx context.Context, c client.Client, options c
 	// Extract header to use in "visibility scope"
 	run, err := c.ExecuteWorkflow(ctx, options, workflow, args...)
 	return workflowHandle[R]{id: run.GetID()}, err
-}
-
-func httpToPayload(header http.Header, body io.Reader) (*commonpb.Payload, error) {
-	panic("TODO")
-}
-
-func payloadToHTTP(*commonpb.Payload) (http.Header, io.Reader, error) {
-	panic("TODO")
 }

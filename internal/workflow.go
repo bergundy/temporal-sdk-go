@@ -2095,9 +2095,14 @@ func (wc *workflowEnvironmentInterceptor) ScheduleNexusOperation(ctx Context, se
 		options,
 		func(operationID string, err error) { startSettable.Set(operationID, err) },
 		func(p *nexuspb.Payload, err error) {
+			// TODO: fix this
+			encoding := "json/plain"
+			if len(p.Body) == 0 {
+				encoding = "binary/null"
+			}
 			tp := &commonpb.Payloads{
 				Payloads: []*commonpb.Payload{{
-					Metadata: map[string][]byte{"encoding": []byte("json/plain")},
+					Metadata: map[string][]byte{"encoding": []byte(encoding)},
 					Data:     p.Body,
 				}},
 			}

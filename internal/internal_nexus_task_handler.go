@@ -29,16 +29,24 @@ func protoHeaderToHTTPHeader(ph map[string]*nexuspb.HeaderValues) http.Header {
 }
 
 type contextKeyClient struct{}
+type contextKeyTaskQueue struct{}
 
 // TODO: this shouldn't be exposed here
 func GetClient(ctx context.Context) Client {
-	fmt.Println("Getting client from context")
 	return ctx.Value(contextKeyClient{}).(Client)
 }
 
 func withClient(ctx context.Context, client Client) context.Context {
-	fmt.Println("Setting client on context")
 	return context.WithValue(ctx, contextKeyClient{}, client)
+}
+
+// TODO: this shouldn't be exposed here
+func GetTaskQueue(ctx context.Context) string {
+	return ctx.Value(contextKeyTaskQueue{}).(string)
+}
+
+func withTaskQueue(ctx context.Context, q string) context.Context {
+	return context.WithValue(ctx, contextKeyTaskQueue{}, q)
 }
 
 // TODO: this should be deleted once nexus operation handlers can get this
@@ -87,7 +95,7 @@ func (h *nexusTaskHandler) execute(taskQueue string, response *workflowservice.P
 		Header: protoHeaderToHTTPHeader(response.Request.Headers),
 	}
 	// TODO: timeout on context
-	ctx := withClient(context.TODO(), h.client)
+	ctx := withTaskQueue(withClient(context.TODO(), h.client), taskQueue)
 	switch req := response.Request.Variant.(type) {
 	case *nexuspb.Request_StartOperation:
 		httpReq.Body = io.NopCloser(bytes.NewReader(req.StartOperation.Body))

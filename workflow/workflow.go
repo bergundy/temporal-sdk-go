@@ -642,11 +642,6 @@ type OperationHandle[R any] interface {
 	GetResult(Context) (R, error)
 }
 
-type VoidOperationHandle interface {
-	WaitStarted(Context) error
-	WaitCompleted(Context) error
-}
-
 type operationHandle[T any] struct {
 	operationID string
 	state       nexus.OperationState
@@ -699,14 +694,17 @@ func StartOperation[I any, R any](ctx Context, service string, op nexus.Operatio
 	return handle, nil
 }
 
-func StartVoidOperation[I any](ctx Context, op nexus.Operation[I, nexus.NoResult], input I) (VoidOperationHandle, error) {
+// Idea one
+func StartNamedOperation[R any](ctx Context, op string, input any) (OperationHandle[R], error) {
 	panic("unimplemented")
 }
 
-func StartNamedOperation[I any, R any](ctx Context, op string, input I) (OperationHandle[R], error) {
-	panic("unimplemented")
+type UntypedOperationHandle interface {
+	WaitStarted(Context) error
+	GetResult(Context, v any) error
 }
 
-func StartNamedVoidOperation(ctx Context, op string, input any) (VoidOperationHandle, error) {
+// Idea two
+func StartUntypedOperation(ctx Context, op string, input any) (UntypedOperationHandle, error) {
 	panic("unimplemented")
 }
