@@ -39,6 +39,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	historypb "go.temporal.io/api/history/v1"
+	nexuspb "go.temporal.io/api/nexus/v1"
 	protocolpb "go.temporal.io/api/protocol/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -82,6 +83,14 @@ type (
 		waitForCancelRequest bool
 		handled              bool
 		activityType         ActivityType
+	}
+
+	scheduledNexusOperation struct {
+		startCallback    func(operationID string, err error)
+		completeCallback NexusResultHandler
+		// TODO
+		waitForCancelRequest bool
+		operation            string
 	}
 
 	scheduledChildWorkflow struct {
@@ -491,6 +500,45 @@ func validateAndSerializeMemo(memoMap map[string]interface{}, dc converter.DataC
 		return nil, errMemoNotSet
 	}
 	return getWorkflowMemo(memoMap, dc)
+}
+
+func (wc *workflowEnvironmentImpl) ScheduleNexusOperation(
+	ctx Context,
+	service,
+	operation string,
+	input *commonpb.Payload,
+	options OperationOptions,
+	startCallback func(string, error),
+	completeCallback func(*nexuspb.Payload, error),
+) {
+	scheduleID := wc.GenerateSequence()
+	scheduleTaskAttr := &commandpb.ScheduleNexusOperationCommandAttributes{
+		Service:   service,
+		Operation: operation,
+		Input:     input,
+		Timeout:   &options.Timeout,
+		// TODO: Headers
+	}
+	// TODO
+	// // We set this as true if not disabled on the params knowing it will be set as
+	// // false just before request by the eager activity executor if eager activity
+	// // execution is otherwise disallowed
+	// scheduleTaskAttr.RequestEagerExecution = !parameters.DisableEagerExecution
+	// scheduleTaskAttr.UseCompatibleVersion = determineUseCompatibleFlagForCommand(
+	// 	parameters.VersioningIntent, wc.workflowInfo.TaskQueueName, parameters.TaskQueueName)
+
+	command := wc.commandsHelper.scheduleNexusOperation(scheduleID, scheduleTaskAttr)
+	command.setData(&scheduledNexusOperation{
+		startCallback:        startCallback,
+		completeCallback:     completeCallback,
+		waitForCancelRequest: false, // TODO
+		operation:            operation,
+	})
+
+	wc.logger.Debug("ScheduleNexusOperation",
+		"NexusService", service,
+		"NexusOperation", operation,
+	)
 }
 
 func (wc *workflowEnvironmentImpl) RegisterCancelHandler(handler func()) {
@@ -1176,6 +1224,16 @@ func (weh *workflowExecutionEventHandlerImpl) ProcessEvent(
 	case enumspb.EVENT_TYPE_WORKFLOW_PROPERTIES_MODIFIED:
 		weh.handleWorkflowPropertiesModified(event)
 
+	case enumspb.EVENT_TYPE_NEXUS_OPERATION_SCHEDULED:
+		weh.commandsHelper.handleNexusOperationScheduled(
+			event.GetEventId())
+
+	case enumspb.EVENT_TYPE_NEXUS_OPERATION_STARTED:
+		weh.handleNexusOperationStarted(event)
+
+	case enumspb.EVENT_TYPE_NEXUS_OPERATION_COMPLETED:
+		weh.handleNexusOperationCompleted(event)
+
 	default:
 		weh.logger.Error("unknown event type",
 			tagEventID, event.GetEventId(),
@@ -1624,6 +1682,33 @@ func (weh *workflowExecutionEventHandlerImpl) handleChildWorkflowExecutionComple
 	}
 	childWorkflow.handle(attributes.Result, nil)
 
+	return nil
+}
+
+func (weh *workflowExecutionEventHandlerImpl) handleNexusOperationStarted(event *historypb.HistoryEvent) error {
+	attributes := event.GetNexusOperationStartedEventAttributes()
+	command := weh.commandsHelper.handleNexusOperationStarted(attributes.ScheduledEventId)
+	state := command.getData().(*scheduledNexusOperation)
+	if state.startCallback != nil {
+		state.startCallback(attributes.OperationId, nil)
+		state.startCallback = nil
+	}
+	return nil
+}
+
+func (weh *workflowExecutionEventHandlerImpl) handleNexusOperationCompleted(event *historypb.HistoryEvent) error {
+	attributes := event.GetNexusOperationCompletedEventAttributes()
+	command := weh.commandsHelper.handleNexusOperationCompleted(attributes.ScheduledEventId)
+	state := command.getData().(*scheduledNexusOperation)
+	if state.completeCallback != nil {
+		state.completeCallback(attributes.GetResult(), nil)
+		state.startCallback = nil
+	}
+	// Also unblock the start future
+	if state.startCallback != nil {
+		state.startCallback("", nil)
+		state.startCallback = nil
+	}
 	return nil
 }
 

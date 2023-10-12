@@ -10,7 +10,6 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/internal"
-	"go.temporal.io/sdk/shared"
 )
 
 type WorkflowRunOperationIDBinding int
@@ -31,7 +30,7 @@ type WorkflowRunOptions[I, O any] struct {
 	Start func(context.Context, client.Client, I) (WorkflowHandle[O], error)
 
 	// TODO: consider removing this
-	Workflow   func(shared.Context, I) (O, error)
+	Workflow   func(internal.Context, I) (O, error)
 	GetOptions func(context.Context, I) (client.StartWorkflowOptions, error)
 }
 
@@ -94,7 +93,7 @@ func (h workflowHandle[T]) GetRunID() string {
 	return h.runID
 }
 
-func StartWorkflow[I, O any, WF func(shared.Context, I) (O, error)](ctx context.Context, c client.Client, options client.StartWorkflowOptions, workflow WF, arg I) (WorkflowHandle[O], error) {
+func StartWorkflow[I, O any, WF func(internal.Context, I) (O, error)](ctx context.Context, c client.Client, options client.StartWorkflowOptions, workflow WF, arg I) (WorkflowHandle[O], error) {
 	// Override callback URL and request ID
 	// Extract header to use in "visibility scope"
 	req := internal.GetStartOperationRequest(ctx)

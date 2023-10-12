@@ -40,6 +40,7 @@ import (
 	commandpb "go.temporal.io/api/command/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -211,6 +212,11 @@ type (
 		testWorkflowEnvironment *testWorkflowEnvironmentImpl
 	}
 )
+
+// ScheduleNexusOperation implements WorkflowEnvironment.
+func (*testWorkflowEnvironmentImpl) ScheduleNexusOperation(ctx Context, service string, operation string, input *commonpb.Payload, options OperationOptions, startCallback func(string, error), completeCallback func(*nexuspb.Payload, error)) {
+	panic("unimplemented")
+}
 
 func newTestWorkflowEnvironmentImpl(s *WorkflowTestSuite, parentRegistry *registry) *testWorkflowEnvironmentImpl {
 	var r *registry

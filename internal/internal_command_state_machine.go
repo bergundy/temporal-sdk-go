@@ -82,6 +82,12 @@ type (
 		attributes *commandpb.ScheduleActivityTaskCommandAttributes
 	}
 
+	nexusOperationStateMachine struct {
+		*commandStateMachineBase
+		scheduleID int64
+		attributes *commandpb.ScheduleNexusOperationCommandAttributes
+	}
+
 	cancelActivityStateMachine struct {
 		*commandStateMachineBase
 		attributes *commandpb.RequestCancelActivityTaskCommandAttributes
@@ -160,6 +166,40 @@ type (
 	}
 )
 
+// TODO: implement more of this
+// getCommand implements commandStateMachine.
+func (sm *nexusOperationStateMachine) getCommand() *commandpb.Command {
+	switch sm.state {
+	case commandStateCreated, commandStateCanceledBeforeSent: // TODO: cancel before sent?
+		return &commandpb.Command{
+			CommandType: enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION,
+			Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
+				ScheduleNexusOperationCommandAttributes: sm.attributes,
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+func (sm *nexusOperationStateMachine) handleStartedEvent() {
+	switch sm.state {
+	case commandStateInitiated:
+		sm.moveState(commandStateStarted, eventStarted)
+	default:
+		sm.failStateTransition(eventStarted)
+	}
+}
+
+func (sm *nexusOperationStateMachine) handleCompletionEvent() {
+	switch sm.state {
+	case commandStateInitiated, commandStateStarted:
+		sm.moveState(commandStateCompleted, eventCompletion)
+	default:
+		sm.failStateTransition(eventStarted)
+	}
+}
+
 const (
 	commandStateCreated                               commandState = 0
 	commandStateCommandSent                           commandState = 1
@@ -190,6 +230,7 @@ const (
 	commandTypeModifyProperties          commandType = 11
 	commandTypeRejectWorkflowUpdate      commandType = 12
 	commandTypeProtocolMessage           commandType = 13
+	commandTypeNexusOperation            commandType = 14
 )
 
 const (
@@ -276,6 +317,8 @@ func (d commandType) String() string {
 		return "CompleteWorkflowUpdate"
 	case commandTypeRejectWorkflowUpdate:
 		return "RejectWorkflowUpdate"
+	case commandTypeNexusOperation:
+		return "NexusOperation"
 	default:
 		return "Unknown"
 	}
@@ -304,6 +347,19 @@ func (h *commandsHelper) newActivityCommandStateMachine(
 ) *activityCommandStateMachine {
 	base := h.newCommandStateMachineBase(commandTypeActivity, attributes.GetActivityId())
 	return &activityCommandStateMachine{
+		commandStateMachineBase: base,
+		scheduleID:              scheduleID,
+		attributes:              attributes,
+	}
+}
+
+func (h *commandsHelper) newNexusOperationStateMachine(
+	scheduleID int64,
+	attributes *commandpb.ScheduleNexusOperationCommandAttributes,
+) *nexusOperationStateMachine {
+	base := h.newCommandStateMachineBase(commandTypeNexusOperation, fmt.Sprintf("%d", scheduleID))
+	fmt.Println("new nexus sm", base.getID())
+	return &nexusOperationStateMachine{
 		commandStateMachineBase: base,
 		scheduleID:              scheduleID,
 		attributes:              attributes,
@@ -448,6 +504,7 @@ func (d *commandStateMachineBase) failStateTransition(event string) {
 func (d *commandStateMachineBase) handleCommandSent() {
 	switch d.state {
 	case commandStateCreated:
+		fmt.Println("moving to send state")
 		d.moveState(commandStateCommandSent, eventCommandSent)
 	}
 }
@@ -926,6 +983,7 @@ func (h *commandsHelper) getCommand(id commandID) commandStateMachine {
 }
 
 func (h *commandsHelper) addCommand(command commandStateMachine) {
+	fmt.Println("adding command", command.getID())
 	if _, ok := h.commands[command.getID()]; ok {
 		panicMsg := fmt.Sprintf("adding duplicate command %v", command)
 		panicIllegalState(panicMsg)
@@ -973,6 +1031,27 @@ func (h *commandsHelper) scheduleActivityTask(
 	return command
 }
 
+func (h *commandsHelper) scheduleNexusOperation(
+	scheduleID int64,
+	attributes *commandpb.ScheduleNexusOperationCommandAttributes,
+) commandStateMachine {
+	command := h.newNexusOperationStateMachine(scheduleID, attributes)
+	h.addCommand(command)
+	return command
+}
+
+func (h *commandsHelper) handleNexusOperationStarted(scheduledEventID int64) commandStateMachine {
+	command := h.getCommand(makeCommandID(commandTypeNexusOperation, fmt.Sprintf("%d", scheduledEventID)))
+	command.handleStartedEvent()
+	return command
+}
+
+func (h *commandsHelper) handleNexusOperationCompleted(scheduledEventID int64) commandStateMachine {
+	command := h.getCommand(makeCommandID(commandTypeNexusOperation, fmt.Sprintf("%d", scheduledEventID)))
+	command.handleCompletionEvent()
+	return command
+}
+
 func (h *commandsHelper) requestCancelActivityTask(activityID string) commandStateMachine {
 	id := makeCommandID(commandTypeActivity, activityID)
 	command := h.getCommand(id)
@@ -999,6 +1078,11 @@ func (h *commandsHelper) handleActivityTaskScheduled(activityID string, schedule
 	}
 
 	command := h.getCommand(makeCommandID(commandTypeActivity, activityID))
+	command.handleInitiatedEvent()
+}
+
+func (h *commandsHelper) handleNexusOperationScheduled(scheduledEventID int64) {
+	command := h.getCommand(makeCommandID(commandTypeNexusOperation, fmt.Sprintf("%d", scheduledEventID)))
 	command.handleInitiatedEvent()
 }
 

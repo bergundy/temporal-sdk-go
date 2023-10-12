@@ -182,7 +182,6 @@ func (w *WorkflowInboundInterceptorBase) ValidateUpdate(ctx Context, in *UpdateI
 func (w *WorkflowInboundInterceptorBase) HandleQuery(ctx Context, in *HandleQueryInput) (interface{}, error) {
 	return w.Next.HandleQuery(ctx, in)
 }
-
 func (*WorkflowInboundInterceptorBase) mustEmbedWorkflowInboundInterceptorBase() {}
 
 // WorkflowOutboundInterceptorBase is a default implementation of
@@ -385,6 +384,10 @@ func (w *WorkflowOutboundInterceptorBase) NewContinueAsNewError(
 	args ...interface{},
 ) error {
 	return w.Next.NewContinueAsNewError(ctx, wfn, args...)
+}
+
+func (w *WorkflowOutboundInterceptorBase) ScheduleNexusOperation(ctx Context, service, operation string, input any, options OperationOptions) (Future, Future, error) {
+	return w.Next.ScheduleNexusOperation(ctx, service, operation, input, options)
 }
 
 func (*WorkflowOutboundInterceptorBase) mustEmbedWorkflowOutboundInterceptorBase() {}

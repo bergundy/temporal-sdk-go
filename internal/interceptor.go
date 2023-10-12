@@ -281,6 +281,9 @@ type WorkflowOutboundInterceptor interface {
 	// interceptor.WorkflowHeader will return a non-nil map for this context.
 	NewContinueAsNewError(ctx Context, wfn interface{}, args ...interface{}) error
 
+	// Returns two futures, one for started and one for completed
+	ScheduleNexusOperation(ctx Context, service, operation string, input any, options OperationOptions) (Future, Future, error)
+
 	mustEmbedWorkflowOutboundInterceptorBase()
 }
 

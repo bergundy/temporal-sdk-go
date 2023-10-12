@@ -35,6 +35,7 @@ import (
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
+	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/serviceerror"
 	"golang.org/x/time/rate"
 
@@ -64,6 +65,7 @@ var (
 var errStop = errors.New("worker stopping")
 
 type (
+	NexusResultHandler func(result *nexuspb.Payload, err error)
 	// ResultHandler that returns result
 	ResultHandler func(result *commonpb.Payloads, err error)
 	// LocalActivityResultHandler that returns local activity result
@@ -123,6 +125,14 @@ type (
 		GetContextPropagators() []ContextPropagator
 		UpsertSearchAttributes(attributes map[string]interface{}) error
 		UpsertMemo(memoMap map[string]interface{}) error
+		ScheduleNexusOperation(
+			ctx Context,
+			service,
+			operation string,
+			input *commonpb.Payload,
+			options OperationOptions,
+			startCallback func(string, error),
+			completeCallback func(*nexuspb.Payload, error))
 		GetRegistry() *registry
 	}
 

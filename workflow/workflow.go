@@ -26,8 +26,6 @@ package workflow
 
 import (
 	"errors"
-	"fmt"
-	"time"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/sdk/converter"
@@ -659,7 +657,7 @@ type operationHandle[T any] struct {
 // GetResult implements OperationHandle.
 func (h *operationHandle[T]) GetResult(ctx Context) (T, error) {
 	err := Await(ctx, func() bool {
-		return h.state != nexus.OperationState("") && h.state != nexus.OperationStateRunning
+		return h.state != nexus.OperationState("") && h.state != nexus.OperationStateRunning || h.err != nil
 	})
 	if err != nil {
 		return h.result, err
@@ -669,32 +667,34 @@ func (h *operationHandle[T]) GetResult(ctx Context) (T, error) {
 
 // WaitStarted implements OperationHandle.
 func (h *operationHandle[T]) WaitStarted(ctx Context) error {
+	// TODO: error should reflect operation error
 	return Await(ctx, func() bool {
-		return h.state != nexus.OperationState("")
+		return h.state != nexus.OperationState("") || h.err != nil
 	})
 }
 
 var _ OperationHandle[any] = &operationHandle[any]{}
 
-func StartOperation[I any, R any](ctx Context, op nexus.Operation[I, R], input I) (OperationHandle[R], error) {
-	// TODO: incremental sequence
-	operationSequence := 1
-	info := GetInfo(ctx)
-	ctx = WithActivityOptions(ctx, ActivityOptions{
-		TaskQueue:           info.TaskQueueName,
-		StartToCloseTimeout: time.Second * 3,
-	})
-	future := ExecuteActivity(ctx, "start-operation", input)
+type OperationOptions = internal.OperationOptions
+
+func StartOperation[I any, R any](ctx Context, service string, op nexus.Operation[I, R], input I, options OperationOptions) (OperationHandle[R], error) {
+	startFuture, completeFuture, err := internal.ScheduleNexusOperation(ctx, service, op.GetName(), input, options)
+	if err != nil {
+		return nil, err
+	}
 	handle := &operationHandle[R]{}
 	Go(ctx, func(ctx Context) {
-		// TODO: handle this and support sync
-		_ = future.Get(ctx, &handle.operationID)
-		// TODO: support unsuccessful completion
-		ch := GetSignalChannel(ctx, fmt.Sprintf("operation-%v", operationSequence))
-		var r R
-		ch.Receive(ctx, &r)
-		handle.result = r
-		handle.state = nexus.OperationStateSucceeded
+		handle.err = startFuture.Get(ctx, &handle.operationID)
+		if handle.err == nil {
+			handle.state = nexus.OperationStateRunning
+		}
+	})
+	Go(ctx, func(ctx Context) {
+		handle.err = completeFuture.Get(ctx, &handle.result)
+		// TODO: Failed | Canceled
+		if handle.err == nil {
+			handle.state = nexus.OperationStateSucceeded
+		}
 	})
 	return handle, nil
 }
