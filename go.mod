@@ -15,7 +15,7 @@ require (
 	github.com/pborman/uuid v1.2.1
 	github.com/robfig/cron v1.2.0
 	github.com/stretchr/testify v1.8.4
-	go.temporal.io/api v1.21.0
+	go.temporal.io/api v1.24.1-0.20231012201728-a472e79c46c9
 	go.uber.org/atomic v1.9.0
 	golang.org/x/sys v0.12.0
 	golang.org/x/time v0.3.0
@@ -39,6 +39,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/nexus-rpc/sdk-go => ../nexus-sdk-go
-
-replace go.temporal.io/api => ../api-go
+replace github.com/nexus-rpc/sdk-go => github.com/bergundy/nexus-sdk-go v0.0.2-0.20231012220114-86dc79d46117
