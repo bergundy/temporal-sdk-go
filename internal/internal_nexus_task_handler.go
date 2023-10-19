@@ -77,6 +77,7 @@ func (h *nexusTaskHandler) fillInCompletion(taskToken []byte, res *nexuspb.Respo
 }
 
 func (h *nexusTaskHandler) internalServerError(taskToken []byte, err error) *workflowservice.RespondNexusTaskCompletedRequest {
+	fmt.Println("internal server error", err)
 	// TODO: log
 	return h.fillInCompletion(taskToken, &nexuspb.Response{
 		Variant: &nexuspb.Response_Error{
