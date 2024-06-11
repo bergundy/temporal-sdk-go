@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -907,4 +908,134 @@ func TestWorkflowTestSuite_NexusSyncOperation_ClientMethods_Panic(t *testing.T) 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
 	require.Equal(t, "not implemented in the test environment", panicReason)
+}
+
+type customOp struct {
+	nexus.UnimplementedOperation[string, string]
+}
+
+func (a *customOp) Cancel(context.Context, string, nexus.CancelOperationOptions) error {
+	return nexus.HandlerErrorf(nexus.HandlerErrorTypeInternal, "intentionally fail to cancel")
+}
+
+func (a *customOp) Name() string {
+	return "custom-op"
+}
+
+func (a *customOp) Start(ctx context.Context, action string, opts nexus.StartOperationOptions) (nexus.HandlerStartOperationResult[string], error) {
+	switch action {
+	case "fail-to-start":
+		return nil, nexus.HandlerErrorf(nexus.HandlerErrorTypeInternal, "intentionally fail to start")
+	case "start-async":
+		return &nexus.HandlerStartOperationResultAsync{OperationID: "test-op-id"}, nil
+	}
+	panic(fmt.Errorf("invalid action: %s", action))
+}
+
+var _ nexus.Operation[string, string] = &customOp{}
+
+func CallerWorkflow(ctx workflow.Context, endpoint, op, action string) error {
+	c := workflow.NewNexusClient(endpoint, "test")
+	ctx, cancel := workflow.WithCancel(ctx)
+	defer cancel()
+	fut := c.ExecuteOperation(ctx, op, action, workflow.NexusOperationOptions{})
+	var res string
+	ch := workflow.GetSignalChannel(ctx, "cancel-op")
+	workflow.Go(ctx, func(ctx workflow.Context) {
+		var action string
+		ch.Receive(ctx, &action)
+		fut.GetNexusOperationExecution().Get(ctx, nil)
+		cancel()
+	})
+	var exec workflow.NexusOperationExecution
+	if err := fut.GetNexusOperationExecution().Get(ctx, &exec); err != nil {
+		return fmt.Errorf("expected start to succeed: %w", err)
+	}
+	if exec.OperationID == "" {
+		return fmt.Errorf("expected non empty operation ID")
+	}
+	return fut.Get(ctx, &res)
+}
+
+func HandlerWorkflow(ctx workflow.Context, _ string) (nexus.NoValue, error) {
+	return nil, nil
+}
+
+func TestOperationIntentionalFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	tc := newTestContext(t, ctx)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() {
+		_ = http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("intentional error"))
+		}))
+	}()
+	require.NoError(t, err)
+	defer l.Close()
+	addr := l.Addr().String()
+	fmt.Println("Listening on", addr)
+
+	workflowOp := temporalnexus.MustNewWorkflowRunOperationWithOptions(temporalnexus.WorkflowRunOperationOptions[string, nexus.NoValue]{
+		Name: "workflow-op",
+		Handler: func(ctx context.Context, s string, soo nexus.StartOperationOptions) (temporalnexus.WorkflowHandle[nexus.NoValue], error) {
+			soo.CallbackURL = "http://" + addr
+			return temporalnexus.ExecuteWorkflow(ctx, soo, client.StartWorkflowOptions{}, HandlerWorkflow, s)
+		},
+	})
+	w := worker.New(tc.client, tc.taskQueue, worker.Options{})
+	service := nexus.NewService("test")
+	require.NoError(t, service.Register(&customOp{}, workflowOp))
+	w.RegisterNexusService(service)
+	w.RegisterWorkflow(CallerWorkflow)
+	w.RegisterWorkflow(HandlerWorkflow)
+	require.NoError(t, w.Start())
+	t.Cleanup(w.Stop)
+
+	t.Run("FailToStart", func(t *testing.T) {
+		run, err := tc.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+			TaskQueue:           tc.taskQueue,
+			WorkflowTaskTimeout: time.Second,
+			ID:                  "FailToStart:" + uuid.NewString(),
+		}, CallerWorkflow, tc.endpoint, (&customOp{}).Name(), "fail-to-start")
+		require.NoError(t, err)
+		require.NoError(t, run.Get(ctx, nil))
+	})
+
+	t.Run("FailToComplete", func(t *testing.T) {
+		run, err := tc.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+			TaskQueue:           tc.taskQueue,
+			WorkflowTaskTimeout: time.Second,
+			ID:                  "FailToComplete:" + uuid.NewString(),
+		}, CallerWorkflow, tc.endpoint, (&customOp{}).Name(), "start-async")
+		require.NoError(t, err)
+		require.NoError(t, run.Get(ctx, nil))
+	})
+
+	t.Run("FailToCancel", func(t *testing.T) {
+		run, err := tc.client.SignalWithStartWorkflow(ctx, "FailToCancel:"+uuid.NewString(), "cancel-op", nil, client.StartWorkflowOptions{
+			TaskQueue: tc.taskQueue,
+		}, CallerWorkflow, tc.endpoint, (&customOp{}).Name(), "start-async")
+		require.NoError(t, err)
+		var execErr *temporal.WorkflowExecutionError
+		err = run.Get(ctx, nil)
+		require.ErrorAs(t, err, &execErr)
+		// The Go SDK unwraps workflow errors to check for cancelation even if the workflow was never canceled, losing
+		// the error chain, Nexus operation errors are treated the same as other workflow errors for consistency.
+		var canceledErr *temporal.CanceledError
+		err = execErr.Unwrap()
+		require.ErrorAs(t, err, &canceledErr)
+	})
+
+	t.Run("FailToCallback", func(t *testing.T) {
+		run, err := tc.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+			TaskQueue:           tc.taskQueue,
+			WorkflowTaskTimeout: time.Second,
+			ID:                  "FailToCallback:" + uuid.NewString(),
+		}, CallerWorkflow, tc.endpoint, workflowOp.Name(), "start-async")
+		require.NoError(t, err)
+		require.NoError(t, run.Get(ctx, nil))
+	})
 }
