@@ -418,7 +418,7 @@ func serializeUntypedSearchAttributes(input map[string]interface{}) (*commonpb.S
 	return &commonpb.SearchAttributes{IndexedFields: attr}, nil
 }
 
-func serializeTypedSearchAttributes(searchAttributes map[SearchAttributeKey]interface{}) (*commonpb.SearchAttributes, error) {
+func SerializeTypedSearchAttributes(searchAttributes map[SearchAttributeKey]interface{}) (*commonpb.SearchAttributes, error) {
 	if searchAttributes == nil {
 		return nil, nil
 	}
@@ -452,7 +452,7 @@ func serializeSearchAttributes(
 			return nil, err
 		}
 	} else if typedAttributes.Size() != 0 {
-		searchAttr, err = serializeTypedSearchAttributes(typedAttributes.GetUntypedValues())
+		searchAttr, err = SerializeTypedSearchAttributes(typedAttributes.GetUntypedValues())
 		if err != nil {
 			return nil, err
 		}

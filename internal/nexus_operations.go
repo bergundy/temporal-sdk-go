@@ -227,7 +227,7 @@ func (t *testSuiteClientForNexusOperations) ExecuteWorkflow(ctx context.Context,
 				ParentClosePolicy:        enums.PARENT_CLOSE_POLICY_ABANDON,
 				Memo:                     options.Memo,
 				CronSchedule:             options.CronSchedule,
-				RetryPolicy:              convertToPBRetryPolicy(options.RetryPolicy),
+				RetryPolicy:              ConvertToPBRetryPolicy(options.RetryPolicy),
 			},
 		}, func(result *commonpb.Payloads, wfErr error) {
 			ncb := callback.GetNexus()

@@ -1839,7 +1839,7 @@ func (wth *workflowTaskHandlerImpl) completeWorkflow(
 			Header:              contErr.Header,
 			Memo:                workflowContext.workflowInfo.Memo,
 			SearchAttributes:    workflowContext.workflowInfo.SearchAttributes,
-			RetryPolicy:         convertToPBRetryPolicy(retryPolicy),
+			RetryPolicy:         ConvertToPBRetryPolicy(retryPolicy),
 			InheritBuildId:      useCompat,
 		}}
 	} else if workflowContext.err != nil {

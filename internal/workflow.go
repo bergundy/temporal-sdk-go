@@ -1737,7 +1737,7 @@ func WithChildWorkflowOptions(ctx Context, cwo ChildWorkflowOptions) Context {
 	wfOptions.WorkflowTaskTimeout = cwo.WorkflowTaskTimeout
 	wfOptions.WaitForCancellation = cwo.WaitForCancellation
 	wfOptions.WorkflowIDReusePolicy = cwo.WorkflowIDReusePolicy
-	wfOptions.RetryPolicy = convertToPBRetryPolicy(cwo.RetryPolicy)
+	wfOptions.RetryPolicy = ConvertToPBRetryPolicy(cwo.RetryPolicy)
 	wfOptions.CronSchedule = cwo.CronSchedule
 	wfOptions.Memo = cwo.Memo
 	wfOptions.SearchAttributes = cwo.SearchAttributes
@@ -2335,7 +2335,7 @@ func WithActivityOptions(ctx Context, options ActivityOptions) Context {
 	eap.HeartbeatTimeout = options.HeartbeatTimeout
 	eap.WaitForCancellation = options.WaitForCancellation
 	eap.ActivityID = options.ActivityID
-	eap.RetryPolicy = convertToPBRetryPolicy(options.RetryPolicy)
+	eap.RetryPolicy = ConvertToPBRetryPolicy(options.RetryPolicy)
 	eap.DisableEagerExecution = options.DisableEagerExecution
 	eap.VersioningIntent = options.VersioningIntent
 	eap.Summary = options.Summary
@@ -2478,11 +2478,11 @@ func WithWaitForCancellation(ctx Context, wait bool) Context {
 // Exposed as: [go.temporal.io/sdk/workflow.WithRetryPolicy]
 func WithRetryPolicy(ctx Context, retryPolicy RetryPolicy) Context {
 	ctx1 := setActivityParametersIfNotExist(ctx)
-	getActivityOptions(ctx1).RetryPolicy = convertToPBRetryPolicy(&retryPolicy)
+	getActivityOptions(ctx1).RetryPolicy = ConvertToPBRetryPolicy(&retryPolicy)
 	return ctx1
 }
 
-func convertToPBRetryPolicy(retryPolicy *RetryPolicy) *commonpb.RetryPolicy {
+func ConvertToPBRetryPolicy(retryPolicy *RetryPolicy) *commonpb.RetryPolicy {
 	if retryPolicy == nil {
 		return nil
 	}
@@ -2748,5 +2748,12 @@ func versioningBehaviorToProto(t VersioningBehavior) enumspb.VersioningBehavior 
 		return enumspb.VERSIONING_BEHAVIOR_AUTO_UPGRADE
 	default:
 		panic("unknown versioning behavior type")
+	}
+}
+
+func NewEncodedValue(value *commonpb.Payloads, dataConverter converter.DataConverter) EncodedValue {
+	return EncodedValue{
+		value:         value,
+		dataConverter: dataConverter,
 	}
 }

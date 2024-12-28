@@ -1099,7 +1099,7 @@ func (h *testWorkflowHandle) rerunAsChild() bool {
 	if errors.As(env.testError, &continueAsNewErr) {
 		params.Input = continueAsNewErr.Input
 		params.Header = continueAsNewErr.Header
-		params.RetryPolicy = convertToPBRetryPolicy(continueAsNewErr.RetryPolicy)
+		params.RetryPolicy = ConvertToPBRetryPolicy(continueAsNewErr.RetryPolicy)
 		params.WorkflowType = continueAsNewErr.WorkflowType
 		params.TaskQueueName = continueAsNewErr.TaskQueueName
 		params.VersioningIntent = continueAsNewErr.VersioningIntent
@@ -2790,7 +2790,7 @@ func validateAndSerializeTypedSearchAttributes(searchAttributes map[SearchAttrib
 		return nil, errSearchAttributesNotSet
 	}
 
-	rawSearchAttributes, err := serializeTypedSearchAttributes(searchAttributes)
+	rawSearchAttributes, err := SerializeTypedSearchAttributes(searchAttributes)
 	if err != nil {
 		return nil, err
 	}

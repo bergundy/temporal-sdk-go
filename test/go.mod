@@ -1,13 +1,11 @@
 module go.temporal.io/sdk/test
 
-go 1.21
-
-toolchain go1.21.1
+go 1.23.4
 
 require (
 	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.6.0
-	github.com/nexus-rpc/sdk-go v0.1.0
+	github.com/nexus-rpc/sdk-go v0.1.1-0.20241227212239-c9ac3500f5b0
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pborman/uuid v1.2.1
 	github.com/stretchr/testify v1.10.0
@@ -23,10 +21,11 @@ require (
 	go.temporal.io/sdk/contrib/tally v0.1.0
 	go.uber.org/goleak v1.1.12
 	google.golang.org/grpc v1.66.0
-	google.golang.org/protobuf v1.34.2
+	google.golang.org/protobuf v1.36.1
 )
 
 require (
+	github.com/bergundy/nexus-proto-annotations v0.0.0-20241227212513-d4f7fd966fb7 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
@@ -40,6 +39,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
+	github.com/nexus-rpc/sdk-go/contrib/nexusproto v0.0.0-20241227212239-c9ac3500f5b0 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
@@ -73,3 +73,5 @@ replace (
 	go.temporal.io/sdk/contrib/resourcetuner => ../contrib/resourcetuner
 	go.temporal.io/sdk/contrib/tally => ../contrib/tally
 )
+
+replace go.temporal.io/api => github.com/bergundy/temporal-api-go v1.43.1-0.20241228003420-09e9d254693d

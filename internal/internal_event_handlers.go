@@ -457,7 +457,7 @@ func (wc *workflowEnvironmentImpl) UpsertSearchAttributes(attributes map[string]
 }
 
 func (wc *workflowEnvironmentImpl) UpsertTypedSearchAttributes(attributes SearchAttributes) error {
-	rawSearchAttributes, err := serializeTypedSearchAttributes(attributes.untypedValue)
+	rawSearchAttributes, err := SerializeTypedSearchAttributes(attributes.untypedValue)
 	if err != nil {
 		return err
 	}

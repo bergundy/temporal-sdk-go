@@ -298,7 +298,7 @@ func (scheduleHandle *scheduleHandleImpl) Update(ctx context.Context, options Sc
 	var newSA *commonpb.SearchAttributes
 	attributes := newSchedule.TypedSearchAttributes
 	if attributes != nil {
-		newSA, err = serializeTypedSearchAttributes(attributes.GetUntypedValues())
+		newSA, err = SerializeTypedSearchAttributes(attributes.GetUntypedValues())
 		if err != nil {
 			return err
 		}
@@ -652,7 +652,7 @@ func convertToPBScheduleAction(
 					WorkflowExecutionTimeout: durationpb.New(action.WorkflowExecutionTimeout),
 					WorkflowRunTimeout:       durationpb.New(action.WorkflowRunTimeout),
 					WorkflowTaskTimeout:      durationpb.New(action.WorkflowTaskTimeout),
-					RetryPolicy:              convertToPBRetryPolicy(action.RetryPolicy),
+					RetryPolicy:              ConvertToPBRetryPolicy(action.RetryPolicy),
 					Memo:                     memo,
 					SearchAttributes:         searchAttrs,
 					Header:                   header,
