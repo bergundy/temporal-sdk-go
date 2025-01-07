@@ -12,6 +12,7 @@ import (
 func TestStartActivity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
+	// This will be part of the regular client, ignore this constructor for the demo.
 	client, err := chasm.NewClient(chasm.ClientOptions{
 		Address:   "localhost:7243",
 		Namespace: "default",
