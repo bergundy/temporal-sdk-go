@@ -1254,7 +1254,7 @@ func (o *manualAsyncOp) ErrorToFailure(err error) nexus.Failure {
 
 func (o *manualAsyncOp) Start(ctx context.Context, input nexus.NoValue, options nexus.StartOperationOptions) (nexus.HandlerStartOperationResult[nexus.NoValue], error) {
 	// Complete before start.
-	completion, err := nexus.NewOperationCompletionUnsuccessful(nexus.NewFailedOperationError(errors.New("async failure")), nexus.OperationCompletionUnsuccessfulOptions{
+	completion, err := nexus.NewOperationCompletionUnsuccessful(nexus.NewOperationFailedError("async failure"), nexus.OperationCompletionUnsuccessfulOptions{
 		FailureConverter: o,
 	})
 	if err != nil {
@@ -1272,7 +1272,7 @@ func (o *manualAsyncOp) Start(ctx context.Context, input nexus.NoValue, options 
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, nexus.NewFailedOperationError(fmt.Errorf("failed to post completion, got status: %v", resp.Status))
+		return nil, nexus.OperationFailedErrorf("failed to post completion, got status: %v", resp.Status)
 	}
 	// This result will be ignored.
 	return &nexus.HandlerStartOperationResultAsync{OperationToken: "dont-care"}, nil
