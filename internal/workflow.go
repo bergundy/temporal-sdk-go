@@ -2677,7 +2677,7 @@ type NexusOperationFuture interface {
 
 // NexusClient is a client for executing Nexus Operations from a workflow.
 // NOTE to maintainers, this interface definition is duplicated in the workflow package to provide a better UX.
-type NexusClient interface {
+type NexusWorkflowClient interface {
 	// The endpoint name this client uses.
 	Endpoint() string
 	// The service name this client uses.
@@ -2692,10 +2692,10 @@ type nexusClient struct {
 	endpoint, service string
 }
 
-// Create a [NexusClient] from an endpoint name and a service name.
+// Create a [NexusWorkflowClient] from an endpoint name and a service name.
 //
 // Exposed as: [go.temporal.io/sdk/workflow.NewNexusClient]
-func NewNexusClient(endpoint, service string) NexusClient {
+func NewNexusWorkflowClient(endpoint, service string) NexusWorkflowClient {
 	if endpoint == "" {
 		panic("endpoint must not be empty")
 	}

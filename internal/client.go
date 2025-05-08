@@ -426,6 +426,8 @@ type (
 		// Schedule creates a new shedule client with the same gRPC connection as this client.
 		ScheduleClient() ScheduleClient
 
+		NexusClient(options NexusClientOptions) NexusClient
+
 		// DeploymentClient creates a new deployment client with the same gRPC connection as this client.
 		//
 		// Deprecated: Use [WorkerDeploymentClient]

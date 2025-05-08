@@ -189,6 +189,11 @@ type (
 	}
 )
 
+// NexusClient implements Client.
+func (wc *WorkflowClient) NexusClient(options NexusClientOptions) NexusClient {
+	panic("unimplemented")
+}
+
 // ExecuteWorkflow starts a workflow execution and returns a WorkflowRun that will allow you to wait until this workflow
 // reaches the end state, such as workflow finished successfully or timeout.
 // The user can use this to start using a functor like below and get the workflow execution result, as EncodedValue

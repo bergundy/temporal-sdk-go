@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"io"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
@@ -337,6 +338,10 @@ type (
 
 	// ScheduleBackfillOptions configure the parameters for backfilling a schedule.
 	ScheduleBackfillOptions = internal.ScheduleBackfillOptions
+
+	NexusClient                         = internal.NexusClient
+	NexusClientOptions                  = internal.NexusClientOptions
+	NexusClientLazyStartOperationResult = internal.NexusClientLazyStartOperationResult
 
 	// UpdateWorkflowOptions encapsulates the parameters for
 	// sending an update to a workflow execution.
@@ -1239,6 +1244,7 @@ type (
 
 		// Schedule creates a new shedule client with the same gRPC connection as this client.
 		ScheduleClient() ScheduleClient
+		NexusClient(options NexusClientOptions) NexusClient
 
 		// DeploymentClient create a new deployment client with the same gRPC connection as this client.
 		//
@@ -1467,4 +1473,91 @@ func NewMTLSCredentials(certificate tls.Certificate) Credentials {
 // NewWorkflowUpdateServiceTimeoutOrCanceledError creates a new WorkflowUpdateServiceTimeoutOrCanceledError.
 func NewWorkflowUpdateServiceTimeoutOrCanceledError(err error) *WorkflowUpdateServiceTimeoutOrCanceledError {
 	return internal.NewWorkflowUpdateServiceTimeoutOrCanceledError(err)
+}
+
+type NexusResponse[T any] interface {
+	Links() []nexus.Link
+	Result() T
+}
+
+// An OperationHandle is used to cancel operations and get their result and status.
+type NexusOperationHandle[T any] interface {
+	// Name of the Service this handle represents.
+	Service() string
+	// Name of the Operation this handle represents.
+	Operation() string
+	// Handler generated token for this handle's operation.
+	Token() string
+
+	// GetInfo gets operation information, issuing a network request to the service handler.
+	GetInfo(ctx context.Context, options nexus.GetOperationInfoOptions) (*nexus.OperationInfo, error)
+	GetResult(ctx context.Context, options nexus.GetOperationResultOptions) (T, error)
+	GetResultWithFullResponse(ctx context.Context, options nexus.GetOperationResultOptions) (NexusResponse[T], error)
+	Cancel(ctx context.Context, options nexus.CancelOperationOptions) error
+}
+
+// NexusClientStartOperationResult is the return type of [NexusClient.StartOperation].
+// One and only one of Successful or Pending will be non-nil.
+type NexusClientStartOperationResult[T any] struct {
+	// Set when start completes synchronously and successfully.
+	//
+	// If T is a [LazyValue], ensure that your consume it or read the underlying content in its entirety and close it to
+	// free up the underlying connection.
+	Successful T
+	// Set when the handler indicates that it started an asynchronous operation.
+	// The attached handle can be used to perform actions such as cancel the operation or get its result.
+	Pending NexusOperationHandle[T]
+	// Links contain information about the operations done by the handler.
+	Links []nexus.Link
+}
+
+// ExecuteNexusOperation is the type safe version of [HTTPClient.ExecuteNexusOperation].
+// It accepts input of type I and returns output of type O, removing the need to consume the [LazyValue] returned by the
+// client method.
+//
+//	ref := NewOperationReference[MyInput, MyOutput]("my-operation")
+//	out, err := ExecuteNexusOperation(ctx, client, ref, MyInput{}, options) // returns MyOutput, error
+func ExecuteNexusOperation[I, O any](ctx context.Context, client NexusClient, operation nexus.OperationReference[I, O], input I, request nexus.ExecuteOperationOptions) (O, error) {
+	var o O
+	value, err := client.ExecuteOperation(ctx, operation.Name(), input, request)
+	if err != nil {
+		return o, err
+	}
+	return o, value.Consume(&o)
+}
+
+// StartNexusOperation is the type safe version of [HTTPClient.StartNexusOperation].
+// It accepts input of type I and returns a [ClientStartOperationResult] of type O, removing the need to consume the
+// [LazyValue] returned by the client method.
+func StartNexusOperation[I, O any](ctx context.Context, client NexusClient, operation nexus.OperationReference[I, O], input I, request nexus.StartOperationOptions) (*NexusClientStartOperationResult[O], error) {
+	result, err := client.StartOperation(ctx, operation.Name(), input, request)
+	if err != nil {
+		return nil, err
+	}
+	if result.Successful != nil {
+		var o O
+		if err := result.Successful.Consume(&o); err != nil {
+			return nil, err
+		}
+		return &NexusClientStartOperationResult[O]{
+			Successful: o,
+			Links:      result.Links,
+		}, nil
+	}
+	var handle NexusOperationHandle[O]
+	// 	client:    client,
+	// 	Operation: operation.Name(),
+	// 	Token:     result.Pending.Token,
+	// }
+
+	return &NexusClientStartOperationResult[O]{
+		Pending: handle,
+		Links:   result.Links,
+	}, nil
+}
+
+// NewHandle is the type safe version of [NexusClient.NewHandle].
+// The [Handle.GetResult] method will return an output of type O.
+func NewHandle[I, O any](client NexusClient, operation nexus.OperationReference[I, O], token string) (NexusOperationHandle[O], error) {
+	panic("not implemented")
 }
