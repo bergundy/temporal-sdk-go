@@ -175,6 +175,7 @@ func (dfc *DefaultFailureConverter) ErrorToFailure(err error) *failurepb.Failure
 			RetryBehavior: retryBehavior,
 		}
 		failure.FailureInfo = &failurepb.Failure_NexusHandlerFailureInfo{NexusHandlerFailureInfo: failureInfo}
+		failure.Message = err.Message
 	default: // All unknown errors are considered to be retryable ApplicationFailureInfo.
 		failureInfo := &failurepb.ApplicationFailureInfo{
 			Type:         getErrType(err),
@@ -294,6 +295,7 @@ func (dfc *DefaultFailureConverter) FailureToError(failure *failurepb.Failure) e
 			retryBehavior = nexus.HandlerErrorRetryBehaviorNonRetryable
 		}
 		err = &nexus.HandlerError{
+			Message:       failure.Message,
 			Type:          nexus.HandlerErrorType(info.Type),
 			Cause:         dfc.FailureToError(failure.GetCause()),
 			RetryBehavior: retryBehavior,

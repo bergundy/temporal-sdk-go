@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -187,7 +188,7 @@ func (h *nexusTaskHandler) handleStartOperation(
 				var ok bool
 				err, ok = recovered.(error)
 				if !ok {
-					err = fmt.Errorf("panic: %v", recovered)
+					err = nexus.HandlerErrorf(nexus.HandlerErrorTypeInternal, "panic: %v", recovered)
 				}
 
 				nctx.log.Error("Panic captured while handling Nexus task", tagStackTrace, string(debug.Stack()), tagError, err)
@@ -205,10 +206,10 @@ func (h *nexusTaskHandler) handleStartOperation(
 		if !panic {
 			nctx.log.Error("Handler returned error while processing Nexus task", tagError, err)
 		}
-		var unsuccessfulOperationErr *nexus.OperationError
+		var operationErr *nexus.OperationError
 		err = convertKnownErrors(err)
-		if errors.As(err, &unsuccessfulOperationErr) {
-			failure, err := h.errorToFailure(unsuccessfulOperationErr.Cause)
+		if errors.As(err, &operationErr) {
+			failure, err := h.errorToFailure(operationErr)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -218,7 +219,7 @@ func (h *nexusTaskHandler) handleStartOperation(
 					StartOperation: &nexuspb.StartOperationResponse{
 						Variant: &nexuspb.StartOperationResponse_OperationError{
 							OperationError: &nexuspb.UnsuccessfulOperationError{
-								OperationState: string(unsuccessfulOperationErr.State),
+								OperationState: string(operationErr.State),
 								Failure:        failure,
 							},
 						},
@@ -358,7 +359,9 @@ func (h *nexusTaskHandler) internalError(err error) (*nexuspb.HandlerError, erro
 	if err != nil {
 		return nil, err
 	}
-	return &nexuspb.HandlerError{ErrorType: string(nexus.HandlerErrorTypeInternal), Failure: failure}, nil
+	return &nexuspb.HandlerError{ErrorType: string(nexus.HandlerErrorTypeInternal), Failure: &nexuspb.Failure{
+		Cause: failure,
+	}}, nil
 }
 
 func (h *nexusTaskHandler) goContextForTask(nctx *NexusOperationContext, header nexus.Header) (context.Context, context.CancelFunc, *nexuspb.HandlerError) {
@@ -428,10 +431,99 @@ func (h *nexusTaskHandler) fillInFailure(taskToken []byte, err *nexuspb.HandlerE
 	}
 }
 
-var nexusFailureTypeString = string((&failurepb.Failure{}).ProtoReflect().Descriptor().FullName())
-var nexusFailureMetadata = map[string]string{"type": nexusFailureTypeString}
+var nexusTemporalFailureMetadata = map[string]string{"type": string((&failurepb.Failure{}).ProtoReflect().Descriptor().FullName())}
+var nexusOperationFailureMetadata = map[string]string{"type": "nexus.OperationError"}
+var nexusHandlerFailureMetadata = map[string]string{"type": "nexus.HandlerError"}
+
+type serializableNexusHandlerError struct {
+	EncodedAttributes []byte `json:"encodedAttributes,omitempty"`
+	Retryable         string `json:"retryable,omitempty"`
+	Type              string `json:"type,omitempty"`
+}
+
+type serializableNexusOperationError struct {
+	EncodedAttributes []byte `json:"encodedAttributes,omitempty"`
+	State             string `json:"state,omitempty"`
+}
+
+func (h *nexusTaskHandler) handlerErrorToFailure(he *nexus.HandlerError) (*nexuspb.Failure, error) {
+	failure := &nexuspb.Failure{}
+	var cause error
+	cause, he.Cause = he.Cause, nil
+	failure.Metadata = nexusHandlerFailureMetadata
+	temporalFailure := h.failureConverter.ErrorToFailure(he)
+	failure.Message = temporalFailure.Message
+	var retryableString string
+	switch he.RetryBehavior {
+	case nexus.HandlerErrorRetryBehaviorRetryable:
+		retryableString = "true"
+	case nexus.HandlerErrorRetryBehaviorNonRetryable:
+		retryableString = "false"
+	}
+	details := serializableNexusHandlerError{
+		Retryable: retryableString,
+		Type:      string(he.Type),
+	}
+	if temporalFailure.EncodedAttributes != nil {
+		var err error
+		if details.EncodedAttributes, err = json.Marshal(temporalFailure.EncodedAttributes); err != nil {
+			return nil, fmt.Errorf("failed to marshal encoded attributes: %w", err)
+		}
+	}
+	b, err := json.Marshal(details)
+	if err != nil {
+		return nil, err
+	}
+	failure.Details = b
+	if cause != nil {
+		nc, err := h.errorToFailure(cause)
+		if err != nil {
+			return nil, err
+		}
+		failure.Cause = nc
+	}
+	return failure, nil
+}
+
+func (h *nexusTaskHandler) operationErrorToFailure(oe *nexus.OperationError) (*nexuspb.Failure, error) {
+	failure := &nexuspb.Failure{}
+	var cause error
+	cause, oe.Cause = oe.Cause, nil
+	failure.Metadata = nexusOperationFailureMetadata
+	// Create an application error with the operation error message so it can be encoded if needed.
+	temporalFailure := h.failureConverter.ErrorToFailure(NewApplicationErrorWithOptions(oe.Message, "nexus.OperationError", ApplicationErrorOptions{}))
+	failure.Message = temporalFailure.Message
+	details := serializableNexusOperationError{
+		State: string(oe.State),
+	}
+	if temporalFailure.EncodedAttributes != nil {
+		var err error
+		if details.EncodedAttributes, err = json.Marshal(temporalFailure.EncodedAttributes); err != nil {
+			return nil, fmt.Errorf("failed to marshal encoded attributes: %w", err)
+		}
+	}
+	b, err := json.Marshal(details)
+	if err != nil {
+		return nil, err
+	}
+	failure.Details = b
+	if cause != nil {
+		nc, err := h.errorToFailure(cause)
+		if err != nil {
+			return nil, err
+		}
+		failure.Cause = nc
+	}
+	return failure, nil
+}
 
 func (h *nexusTaskHandler) errorToFailure(err error) (*nexuspb.Failure, error) {
+	if he, ok := err.(*nexus.HandlerError); ok {
+		return h.handlerErrorToFailure(he)
+	}
+	if oe, ok := err.(*nexus.OperationError); ok {
+		return h.operationErrorToFailure(oe)
+	}
 	failure := h.failureConverter.ErrorToFailure(err)
 	if failure == nil {
 		return nil, nil
@@ -442,18 +534,23 @@ func (h *nexusTaskHandler) errorToFailure(err error) (*nexuspb.Failure, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &nexuspb.Failure{
-		Message:  message,
-		Metadata: nexusFailureMetadata,
-		Details:  b,
-	}, nil
+	for {
+		// Not nesting causes in the Nexus failure, we consider anything that is a Temporal specific failure self contained.
+		return &nexuspb.Failure{
+			Message:  message,
+			Metadata: nexusTemporalFailureMetadata,
+			Details:  b,
+		}, nil
+
+	}
 }
 
 func (h *nexusTaskHandler) nexusHandlerErrorToProto(handlerErr *nexus.HandlerError) (*nexuspb.HandlerError, error) {
-	failure, err := h.errorToFailure(handlerErr.Cause)
+	failure, err := h.errorToFailure(handlerErr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to convert nexus handler error to failure: %w", err)
 	}
+	fmt.Println("AAAAAAAAAAAAAAAAA", handlerErr.Type, handlerErr.Message, "FFFFF", failure)
 	var retryBehavior enumspb.NexusHandlerErrorRetryBehavior
 	switch handlerErr.RetryBehavior {
 	case nexus.HandlerErrorRetryBehaviorRetryable:
