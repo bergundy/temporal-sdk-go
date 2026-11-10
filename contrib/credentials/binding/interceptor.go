@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	commonpb "go.temporal.io/api/common/v1"
+	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
 	nexuspb "go.temporal.io/api/nexus/v1"
 	updatepb "go.temporal.io/api/update/v1"
@@ -61,10 +62,7 @@ func NewInterceptor(opts Options) grpc.UnaryClientInterceptor {
 	if opts.Keyset == nil {
 		panic("binding.NewInterceptor: Options.Keyset is required")
 	}
-	b := &binder{keys: opts.Keyset, strict: opts.Strict, log: opts.Logger}
-	if b.log == nil {
-		b.log = slog.Default()
-	}
+	b := newBinder(opts)
 	return func(
 		ctx context.Context,
 		method string,
@@ -92,6 +90,28 @@ func NewInterceptor(opts Options) grpc.UnaryClientInterceptor {
 		}
 		return nil
 	}
+}
+
+func newBinder(opts Options) *binder {
+	b := &binder{keys: opts.Keyset, strict: opts.Strict, log: opts.Logger}
+	if b.log == nil {
+		b.log = slog.Default()
+	}
+	return b
+}
+
+// OpenHistory opens the headers of history's events the way the interceptor
+// opens a GetWorkflowExecutionHistory reply, first removing every opened
+// result already there, so none read from a file or other storage is
+// trusted. With a nil Keyset, it only removes them. namespace and workflowID
+// are the Workflow's: they're part of the contexts its headers are bound to.
+func OpenHistory(opts Options, namespace, workflowID string, history *historypb.History) {
+	b := newBinder(opts)
+	o := &opener{b: b, rpc: "OpenHistory", ns: namespace, done: newHandled()}
+	if b.keys != nil {
+		o.openHistory(history.GetEvents(), workflowID, 0)
+	}
+	walk(history.ProtoReflect(), &stripper{b: b, done: o.done, rpc: o.rpc})
 }
 
 func rpcName(method string) string {
@@ -279,7 +299,7 @@ func (s *sealer) sealHeader(h *commonpb.Header, nexusEndpoint, what, id string, 
 	default:
 		return sealingError(what, id, codecError(HeaderCredentials, enc, EncodingPending))
 	}
-	values, err := parseValues(p.GetData())
+	values, err := ParseValues(p.GetData())
 	if err != nil {
 		return sealingError(what, id, err)
 	}
@@ -326,7 +346,7 @@ func (s *sealer) sealNexus(parent proto.Message, h map[string]string, what, id, 
 	if !ok || strings.HasPrefix(pending, SealedPrefix) {
 		return nil
 	}
-	values, err := parseValues([]byte(pending))
+	values, err := ParseValues([]byte(pending))
 	if err != nil {
 		return sealingError(what, id, err)
 	}
@@ -398,6 +418,7 @@ func (b *binder) inbound(method string, req, reply proto.Message) {
 	case *workflowservice.GetWorkflowExecutionHistoryResponse:
 		if hr, ok := req.(*workflowservice.GetWorkflowExecutionHistoryRequest); ok {
 			o.openHistory(r.GetHistory().GetEvents(), hr.GetExecution().GetWorkflowId(), 0)
+			o.openRawHistory(r.GetRawHistory(), hr.GetExecution().GetWorkflowId())
 		}
 	case *workflowservice.PollActivityTaskQueueResponse:
 		o.openActivityTask(r)
@@ -452,6 +473,40 @@ func (o *opener) openHistory(events []*historypb.HistoryEvent, wfID string, prev
 		case e.GetWorkflowExecutionUpdateAcceptedEventAttributes() != nil:
 			o.openUpdate(e.GetWorkflowExecutionUpdateAcceptedEventAttributes().GetAcceptedRequest(), t)
 		}
+	}
+}
+
+// openRawHistory opens history a server sent as serialized batches, and
+// re-serializes them. A batch it can't read is emptied, so its headers fail
+// closed.
+func (o *opener) openRawHistory(blobs []*commonpb.DataBlob, wfID string) {
+	if len(blobs) == 0 {
+		return
+	}
+	batches := make([]*historypb.History, len(blobs))
+	var events []*historypb.HistoryEvent
+	for i, blob := range blobs {
+		h := &historypb.History{}
+		if blob.GetEncodingType() != enumspb.ENCODING_TYPE_PROTO3 || proto.Unmarshal(blob.GetData(), h) != nil {
+			o.b.log.Warn("Dropping a raw history batch the binding layer can't read",
+				slog.String("rpc", o.rpc), slog.String("workflow_id", wfID))
+			blob.Data = nil
+			continue
+		}
+		batches[i] = h
+		events = append(events, h.GetEvents()...)
+	}
+	o.openHistory(events, wfID, 0)
+	for i, h := range batches {
+		if h == nil {
+			continue
+		}
+		walk(h.ProtoReflect(), &stripper{b: o.b, done: o.done, rpc: o.rpc})
+		data, err := proto.Marshal(h)
+		if err != nil {
+			data = nil
+		}
+		blobs[i].Data = data
 	}
 }
 
@@ -516,17 +571,17 @@ func (o *opener) openHeader(h *commonpb.Header, t target, info func() []byte, sk
 		}
 		reason := reasonFor(err)
 		o.fail(t, reason, string(p.GetData()))
-		p.Metadata[HeaderOpened] = Opened{Reason: reason}.marshal()
+		p.Metadata[HeaderOpened] = Opened{Reason: reason}.Marshal()
 		return
 	}
-	p.Metadata[HeaderOpened] = Opened{OK: true, Credentials: creds}.marshal()
+	p.Metadata[HeaderOpened] = Opened{OK: true, Credentials: creds}.Marshal()
 }
 
 // failurePayload stands in for a credentials value that wasn't sealed. Its
 // plaintext never reaches the application.
 func failurePayload(reason string) *commonpb.Payload {
 	p := newPayload(EncodingSealed, nil)
-	p.Metadata[HeaderOpened] = Opened{Reason: reason}.marshal()
+	p.Metadata[HeaderOpened] = Opened{Reason: reason}.Marshal()
 	return p
 }
 
@@ -568,7 +623,7 @@ func (o *opener) openNexus(r *nexuspb.Request) {
 			res = Opened{OK: true, Credentials: creds}
 		}
 	}
-	h[HeaderOpened] = string(res.marshal())
+	h[HeaderOpened] = string(res.Marshal())
 }
 
 func reasonFor(err error) string {

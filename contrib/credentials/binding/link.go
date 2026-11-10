@@ -67,7 +67,8 @@ type Opened struct {
 	Credentials map[string]string `json:"credentials,omitempty"`
 }
 
-func (o Opened) marshal() []byte {
+// Marshal encodes o as the binding layer attaches it.
+func (o Opened) Marshal() []byte {
 	b, _ := json.Marshal(o)
 	return b
 }
@@ -164,7 +165,7 @@ func LocalFromHeader(fields map[string]*commonpb.Payload) (map[string]string, bo
 	if payloadEncoding(p) != EncodingLocal {
 		return nil, false
 	}
-	values, err := parseValues(p.GetData())
+	values, err := ParseValues(p.GetData())
 	if err != nil {
 		return nil, false
 	}
@@ -195,11 +196,12 @@ func SealedPayload(sealed string) *commonpb.Payload {
 // Test helpers use it to build headers in the opened form.
 func OpenedPayload(sealed string, o Opened) *commonpb.Payload {
 	p := SealedPayload(sealed)
-	p.Metadata[HeaderOpened] = o.marshal()
+	p.Metadata[HeaderOpened] = o.Marshal()
 	return p
 }
 
-func parseValues(data []byte) (map[string]string, error) {
+// ParseValues decodes a pending or local credentials value.
+func ParseValues(data []byte) (map[string]string, error) {
 	var values map[string]string
 	if err := json.Unmarshal(data, &values); err != nil || values == nil {
 		return nil, errors.New("pending credentials must be a JSON object of strings")

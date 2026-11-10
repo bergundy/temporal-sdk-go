@@ -21,15 +21,25 @@ func (systemInfoServer) GetSystemInfo(context.Context, *workflowservice.GetSyste
 }
 
 func TestServerInterceptorAdvertises(t *testing.T) {
-	for name, opt := range map[string]grpc.ServerOption{
-		"unary":  grpc.UnaryInterceptor(UnaryServerInterceptor()),
-		"stream": grpc.StreamInterceptor(StreamServerInterceptor()),
+	// A proxy that forwards unary calls through a stream handler uses the
+	// stream interceptor.
+	forward := func(_ any, stream grpc.ServerStream) error {
+		if err := stream.RecvMsg(&workflowservice.GetSystemInfoRequest{}); err != nil {
+			return err
+		}
+		return stream.SendMsg(&workflowservice.GetSystemInfoResponse{})
+	}
+	for name, opts := range map[string][]grpc.ServerOption{
+		"unary":  {grpc.UnaryInterceptor(UnaryServerInterceptor())},
+		"stream": {grpc.StreamInterceptor(StreamServerInterceptor()), grpc.UnknownServiceHandler(forward)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			lis, err := net.Listen("tcp", "127.0.0.1:0")
 			require.NoError(t, err)
-			srv := grpc.NewServer(opt)
-			workflowservice.RegisterWorkflowServiceServer(srv, systemInfoServer{})
+			srv := grpc.NewServer(opts...)
+			if name == "unary" {
+				workflowservice.RegisterWorkflowServiceServer(srv, systemInfoServer{})
+			}
 			go func() { _ = srv.Serve(lis) }()
 			t.Cleanup(srv.Stop)
 
@@ -40,13 +50,7 @@ func TestServerInterceptorAdvertises(t *testing.T) {
 			var md metadata.MD
 			_, err = workflowservice.NewWorkflowServiceClient(conn).GetSystemInfo(t.Context(), &workflowservice.GetSystemInfoRequest{}, grpc.Header(&md))
 			require.NoError(t, err)
-			if name == "unary" {
-				require.True(t, IsAdvertised(md))
-			} else {
-				// A stream interceptor doesn't run for unary handlers; proxies
-				// that forward through a stream handler use it.
-				require.False(t, IsAdvertised(md))
-			}
+			require.True(t, IsAdvertised(md))
 		})
 	}
 	require.False(t, IsAdvertised(metadata.Pairs(AdvertisementHeader, "v0")))
