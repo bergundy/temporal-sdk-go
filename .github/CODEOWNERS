@@ -3,3 +3,4 @@
 
 * @temporalio/sdk
 /contrib/workflowstreams/ @temporalio/sdk @temporalio/ai-sdk
+/contrib/credentials/ @temporalio/sdk
