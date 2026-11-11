@@ -116,7 +116,7 @@ In proxy mode, Temporal Proxy seals and opens credentials for the application. T
 
 The link between application code and its binding layer is plaintext, in the plugin and in the proxy. Inside an application, credentials sit in request and response protos:
 
-- Other gRPC and SDK interceptors can see them in headers. Don't log headers.
+- SDK interceptors, and gRPC interceptors that come before the plugin's in `ConnectionOptions.DialOptions` (all of them in proxy mode), see them in Temporal headers. Don't log those headers, or whole request and response messages. Credentials never travel in gRPC metadata.
 - History read through a binding layer carries opened credentials, including `client.GetWorkflowHistory` in a process with the plugin, a CLI pointed at the proxy, and fixtures saved from either. Treat those histories as secrets.
 
 Nothing in plaintext leaves the application: the binding layer seals the positions it knows and removes every other credentials field, in both directions.
