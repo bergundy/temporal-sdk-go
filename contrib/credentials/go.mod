@@ -6,7 +6,7 @@ require (
 	github.com/nexus-rpc/sdk-go v0.7.0
 	github.com/stretchr/testify v1.11.1
 	go.temporal.io/api v1.64.3
-	go.temporal.io/sdk v1.48.0
+	go.temporal.io/sdk v1.51.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.11
 )
